@@ -4,55 +4,48 @@
 #include "Core.h"
 #include "Sampling.h"
 
-class Ray
-{
+class Ray {
 public:
 	Vec3 o;
 	Vec3 dir;
 	Vec3 invDir;
-	Ray()
-	{
-	}
-	Ray(Vec3 _o, Vec3 _d)
-	{
+	Ray() {}
+	Ray(Vec3 _o, Vec3 _d) {
 		init(_o, _d);
 	}
-	void init(Vec3 _o, Vec3 _d)
-	{
+
+	void init(Vec3 _o, Vec3 _d) {
 		o = _o;
 		dir = _d;
 		invDir = Vec3(1.0f / dir.x, 1.0f / dir.y, 1.0f / dir.z);
 	}
-	Vec3 at(const float t) const
-	{
+
+	Vec3 at(const float t) const {
 		return (o + (dir * t));
 	}
 };
 
-class Plane
-{
+class Plane {
 public:
 	Vec3 n;
 	float d;
-	void init(Vec3& _n, float _d)
-	{
+	void init(Vec3& _n, float _d) {
 		n = _n;
 		d = _d;
 	}
+
 	// Add code here
-	bool rayIntersect(Ray& r, float& t)
-	{
+	bool rayIntersect(Ray& r, float& t) {
 		float denom = Dot(n, r.dir);
 		if (denom == 0) { return false; }
 
 		t = (-d - Dot(n, r.o)) / denom;
-		if (t < 0) { return false; }
+		if (t < 0) return false;
 		return true;
 	}
 };
 
-class Triangle
-{
+class Triangle {
 public:
 	Vertex vertices[3];
 	Vec3 e1; // Edge 1
@@ -62,8 +55,7 @@ public:
 	float d; // For ray triangle if needed
 	unsigned int materialIndex;
 
-	void init(Vertex v0, Vertex v1, Vertex v2, unsigned int _materialIndex)
-	{
+	void init(Vertex v0, Vertex v1, Vertex v2, unsigned int _materialIndex) {
 		materialIndex = _materialIndex;
 		vertices[0] = v0;
 		vertices[1] = v1;
@@ -75,63 +67,31 @@ public:
 		d = Dot(n, vertices[0].p);
 	}
 
-	Vec3 centre() const
-	{
+	Vec3 centre() const {
 		return (vertices[0].p + vertices[1].p + vertices[2].p) / 3.0f;
 	}
 
 	// Add code here
-	//bool rayIntersect(const Ray& r, float& t, float& u, float& v) const {
-	//	float denom = Dot(n, r.dir);
-	//	if (denom == 0) { return false; }
+	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const {
+		float denom = Dot(n, r.dir);
+		if (denom == 0) { return false; }
 
-	//	t = (d - Dot(n, r.o)) / denom;
-	//	if (t < 0) { return false; }
+		t = (d - Dot(n, r.o)) / denom;
+		if (t < 0) { return false; }
 
-	//	Vec3 p = r.at(t);
-	//	float invArea = 1.0f / Dot(e1.cross(e2), n);
-	//	u = Dot(e1.cross(p - vertices[1].p), n) * invArea;
-	//	if (u < 0 || u > 1.0f) { return false; }
-
-	//	v = Dot(e2.cross(p - vertices[2].p), n) * invArea;
-	//	if (v < 0 || (u + v) > 1.0f) { return false; }
-
-	//	return true;
-
-	//	// to do
-	//	// Moller-Trumbore
-
-
-	//}
-
-	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const
-	{
-		Vec3 v0 = vertices[0].p;
-		Vec3 v1 = vertices[1].p;
-		Vec3 v2 = vertices[2].p;
-
-		Vec3 edge1 = v1 - v0;
-		Vec3 edge2 = v2 - v0;
-
-		Vec3 pvec = Cross(r.dir, edge2);
-		float det = Dot(edge1, pvec);
-
-		if (fabs(det) < EPSILON) return false;
-
-		float invDet = 1.0f / det;
-
-		Vec3 tvec = r.o - v0;
-		u = Dot(tvec, pvec) * invDet;
-		if (u < 0.0f || u > 1.0f) return false;
-
-		Vec3 qvec = Cross(tvec, edge1);
-		v = Dot(r.dir, qvec) * invDet;
-		if (v < 0.0f || u + v > 1.0f) return false;
-
-		t = Dot(edge2, qvec) * invDet;
-		if (t <= EPSILON) return false;
+		Vec3 p = r.at(t);
+		float invArea = 1.0f / Dot(e1.cross(e2), n);
+		u = Dot(e1.cross(p - vertices[1].p), n) * invArea;
+		if (u < 0 || u > 1.0f) { return false; }
+		v = Dot(e2.cross(p - vertices[2].p), n) * invArea;
+		if (v < 0 || (u + v) > 1.0f) { return false; }
 
 		return true;
+
+		// to do
+		// Moller-Trumbore
+
+
 	}
 
 	void interpolateAttributes(const float alpha, const float beta, const float gamma, Vec3& interpolatedNormal, float& interpolatedU, float& interpolatedV) const
@@ -164,8 +124,7 @@ public:
 	}
 };
 
-class AABB
-{
+class AABB {
 public:
 	Vec3 max;
 	Vec3 min;
@@ -260,8 +219,6 @@ public:
 	BVHNode* r;
 	BVHNode* l;
 
-
-
 	BVHNode() {
 		r = NULL;
 		l = NULL;
@@ -276,7 +233,7 @@ public:
 	// Note there are several options for how to implement the build method. Update this as required
 	void build(std::vector<Triangle>& inputTriangles) {
 		// Add BVH building code here
-		buildReversive(inputTriangles, 0, inputTriangles.size());
+		buildRecursive(inputTriangles, 0, inputTriangles.size());
 	}
 
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection) {
@@ -343,7 +300,7 @@ public:
 	}
 
 private:
-	void buildReversive(std::vector<Triangle>& inputTriangles, int start, int count) {
+	void buildRecursive(std::vector<Triangle>& inputTriangles, int start, int count) {
 		_start = start;
 		_count = count;
 		bounds.reset();
@@ -360,14 +317,15 @@ private:
 
 		Vec3 size = bounds.max - bounds.min;
 		int axis = 0;
-		if (size.y > size.x && size.y > size.z) axis = 1;
-		else if (size.z > size.x && size.z > size.y) axis = 2;
 
-		std::sort(inputTriangles.begin() + start, inputTriangles.begin() + start + count,
-			[axis](const Triangle& a, const Triangle& b) {
-				if (axis == 0) return a.centre().x < b.centre().x;
-				if (axis == 1) return a.centre().y < b.centre().y;
-				return a.centre().z < b.centre().z;
+		auto axisValue = [axis](const Triangle& t) -> float {
+			Vec3 centre = t.centre();
+			return axis == 0 ? centre.x : (axis == 1 ? centre.y : centre.z);
+		};
+
+		std::sort(inputTriangles.begin() + start, inputTriangles.begin() + start + count, 
+			[&](const Triangle& a, const Triangle& b) {
+				return axisValue(a) < axisValue(b);
 			}
 		);
 
@@ -381,7 +339,7 @@ private:
 		l = new BVHNode();
 		r = new BVHNode();
 
-		l->buildReversive(inputTriangles, _start, leftCount);
-		r->buildReversive(inputTriangles, _start + leftCount, rightCount);
+		l->buildRecursive(inputTriangles, _start, leftCount);
+		r->buildRecursive(inputTriangles, _start + leftCount, rightCount);
 	}
 };
