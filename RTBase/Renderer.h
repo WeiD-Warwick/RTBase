@@ -10,6 +10,7 @@
 #include "GamesEngineeringBase.h"
 #include <thread>
 #include <functional>
+#include <atomic>
 
 class RayTracer
 {
@@ -96,7 +97,45 @@ public:
 
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler) {
 		// Add pathtracer code here
-		return Colour(0.0f, 1.0f, 0.0f);
+		int maxDepth = 4;
+
+		if (depth >= maxDepth) {
+			return Colour(0, 0, 0);
+		}
+
+		IntersectionData intersection = scene->traverse(r);
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+
+		if (shadingData.t >= FLT_MAX) {
+			return pathThroughput * scene->background->evaluate(r.dir);
+		}
+
+		if (shadingData.bsdf->isLight()) {
+			if (depth == 0) {
+				return pathThroughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
+			}
+			return Colour(0, 0, 0);
+		}
+		
+		Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
+
+		Colour reflectedColour;
+		float pdf = 0;
+		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);
+
+		if (pdf <= 0) return Lo;
+
+		float cosTheta = std::max(0.0f, Dot(shadingData.sNormal, wi));
+		if (cosTheta <= 0.0f) return Lo;
+
+		Colour nextPaththroughput = pathThroughput * reflectedColour * (cosTheta / pdf);
+		if (nextPaththroughput.Lum() <= 0.0f) return Lo;
+
+
+		Ray nextRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
+		Lo = Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler);
+
+		return Lo;
 	}
 
 	Colour direct(Ray& r, Sampler* sampler) {
@@ -139,19 +178,23 @@ public:
 	void render() {
 		film->incrementSPP();
 		int rowsPerThread = film->height / numProcs;
+		std::atomic<int> nextRow(0);
 
 		for (int i = 0; i < numProcs; i++) {
-			threads[i] = new std::thread([this, i, rowsPerThread]() {
-				int startY = i * rowsPerThread;
-				int endY = (i == numProcs - 1) ? film->height : startY + rowsPerThread;
+			threads[i] = new std::thread([this, i, &nextRow]() {
+				while (true) {
+					int y = nextRow.fetch_add(1);
+					if (y >= film->height) break;
 
-				for (int y = startY; y < endY; y++) {
-					for (int x = 0; x < (int)film->width; x++) {
-						float px = x + 0.5f;
-						float py = y + 0.5f;
+					for (int x = 0; x < film->width; x++) {
+						float px = x + samplers[i].next();
+						float py = y + samplers[i].next();
+
 						Ray ray = scene->camera.generateRay(px, py);
+						//Colour col = direct(ray, &samplers[i]);
 
-						Colour col = direct(ray, &samplers[i]);
+						Colour pathThroughput = Colour(1, 1, 1);
+						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i]);
 
 						film->splat(px, py, col);
 						unsigned char r, g, b;
