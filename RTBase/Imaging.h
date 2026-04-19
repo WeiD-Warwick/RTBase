@@ -184,8 +184,8 @@ public:
 		int size = filter->size();
 		for (int i = -size; i <= size; i++) {
 			for (int j = -size; j <= size; j++) {
-				int px = (int)x + j;
-				int py = (int)y + i;
+				unsigned int px = (int)x + j;
+				unsigned int py = (int)y + i;
 				if (px >= 0 && px < width && py >= 0 && py < height) {
 					indices[used] = (py * width) + px;
 					filterWeights[used] = filter->filter(px - x, py - y);
@@ -194,7 +194,7 @@ public:
 				}
 			}
 		}
-		for (int i = 0; i < used; i++) {
+		for (unsigned int i = 0; i < used; i++) {
 			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
 		}
 	}

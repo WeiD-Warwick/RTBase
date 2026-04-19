@@ -177,29 +177,40 @@ public:
 
 	void render() {
 		film->incrementSPP();
-		int rowsPerThread = film->height / numProcs;
-		std::atomic<int> nextRow(0);
+		std::atomic<int> nextTile(0);
+		const int tileSize = 16;
+		const int tilesX = (film->width + tileSize - 1) / tileSize;
+		const int tilesY = (film->height + tileSize - 1) / tileSize;
+		const int totalTiles = tilesX * tilesY;
 
 		for (int i = 0; i < numProcs; i++) {
-			threads[i] = new std::thread([this, i, &nextRow]() {
+			threads[i] = new std::thread([this, i, &nextTile, tileSize, tilesX, tilesY, totalTiles]() {
 				while (true) {
-					int y = nextRow.fetch_add(1);
-					if (y >= film->height) break;
+					int tileIndex = nextTile.fetch_add(1);
+					if (tileIndex >= totalTiles) break;
+					int tileY = tileIndex / tilesX;
+					int tileX = tileIndex % tilesX;
+					int xStart = tileX * tileSize;
+					int yStart = tileY * tileSize;
+					int xEnd = std::min((int)film->width, xStart + tileSize);
+					int yEnd = std::min((int)film->height, yStart + tileSize);
 
-					for (int x = 0; x < film->width; x++) {
-						float px = x + samplers[i].next();
-						float py = y + samplers[i].next();
+					for (int y = yStart; y < yEnd; y++) {
+						for (int x = xStart; x < xEnd; x++) {
+							float px = x + samplers[i].next();
+							float py = y + samplers[i].next();
 
-						Ray ray = scene->camera.generateRay(px, py);
-						//Colour col = direct(ray, &samplers[i]);
+							Ray ray = scene->camera.generateRay(px, py);
+							//Colour col = direct(ray, &samplers[i]);
 
-						Colour pathThroughput = Colour(1, 1, 1);
-						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i]);
+							Colour pathThroughput = Colour(1, 1, 1);
+							Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i]);
 
-						film->splat(px, py, col);
-						unsigned char r, g, b;
-						film->tonemap(x, y, r, g, b);
-						canvas->draw(x, y, r, g, b);
+							film->splat(px, py, col);
+							unsigned char r, g, b;
+							film->tonemap(x, y, r, g, b);
+							canvas->draw(x, y, r, g, b);
+						}
 					}
 				}
 				});
