@@ -83,9 +83,9 @@ public:
 			float G = cosTheta * cosThetaPrime / shadowRayDir.lengthSq();
 
 			// Evaluate BSDF
-			Colour F = shadingData.bsdf->evaluate(shadingData, wi);
+			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
 
-			return (emission * F * G) / (lightPdf * pmf);
+			return (emission * reflectedColour * G) / (lightPdf * pmf);
 		} else {
 			float lightPdf = 0.0f;
 			// Sample from light, returns direction instead of point
@@ -95,7 +95,7 @@ public:
 			Colour emission = light->evaluate(wi);
 
 			// Evaluate visibility to outside scene bounds
-			Ray shadowRay(shadingData.x, wi);
+			Ray shadowRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
 			IntersectionData shadowHit = scene->traverse(shadowRay);
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
@@ -104,19 +104,13 @@ public:
 			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
 			// Evaluate BSDF and multiply terms and return 
-			Colour F = shadingData.bsdf->evaluate(shadingData, wi);
-			return (emission * F * cosTheta) / (lightPdf * pmf);
+			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
+			return (emission * reflectedColour * cosTheta) / (lightPdf * pmf);
 		}
 	}
 
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler) {
-		// Add pathtracer code here
-		int maxDepth = 4;
-
-		if (depth >= maxDepth) {
-			return Colour(0, 0, 0);
-		}
-
+		// Get Shading Point
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 
@@ -130,26 +124,51 @@ public:
 			}
 			return Colour(0, 0, 0);
 		}
-		
-		Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
+		else {
+			// multiply continuously along the path (pathThroughput * Fr * cosTheta / pdf)
 
-		float pdf = 0;
-		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, pdf);
-		Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
+			// Direct Light (NEE)
+			Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
 
-		if (pdf <= 0) return Lo;
+			// Indirect Light (traverse)
+			float pdf = 0.0f;
+			Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, pdf);
+			if (pdf <= 0) return Lo;
 
-		float cosTheta = std::max(0.0f, Dot(shadingData.sNormal, wi));
-		if (cosTheta <= 0.0f) return Lo;
+			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
 
-		Colour nextPaththroughput = pathThroughput * reflectedColour * (cosTheta / pdf);
-		if (nextPaththroughput.Lum() <= 0.0f) return Lo;
+			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
+			if (cosTheta <= 0.0f) return Lo;
+
+			Colour nextPaththroughput = pathThroughput * reflectedColour * cosTheta / pdf;
+			if (nextPaththroughput.Lum() <= 0.0f) return Lo;
+
+			// Russian Roulette
+			// Light TracePath 199
+			if (depth >= 3) {
+				float continueProbability = std::min(nextPaththroughput.Lum(), 0.95f);
+
+				if (continueProbability <= 0.0f) {
+					return Lo;
+				}
+
+				if (sampler->next() > continueProbability) {
+					return Lo;
+				}
+
+				nextPaththroughput = nextPaththroughput / continueProbability;
+			}
 
 
-		Ray nextRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
-		Lo = Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler);
+			Ray nextRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
+			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler);
+		}
+	}
 
-		return Lo;
+	float powerHeuristic(float pdfA, float pdfB) {
+		float a2 = pdfA * pdfA;
+		float b2 = pdfB * pdfB;
+		return a2 / (a2 + b2);
 	}
 
 	Colour direct(Ray& r, Sampler* sampler) {
