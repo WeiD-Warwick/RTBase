@@ -71,7 +71,7 @@ public:
 			bool visible = scene->visible(shadingData.x, sampleLightPoint);
 			if (!visible) return Colour(0.0f, 0.0f, 0.0f);
 
-			// Calculate Geometry Term 
+			// Calculate Geometry Term
 			// Mento Carlo 65
 			Vec3 lightNormal = light->normal(shadingData, -wi);
 			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
@@ -84,8 +84,12 @@ public:
 
 			// Evaluate BSDF
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
+			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+			// convert to same domains
+			float bsdfPdfArea = bsdfPdf * cosThetaPrime / shadowRayDir.lengthSq();
+			float weight = powerHeuristic(lightPdf, bsdfPdfArea);
 
-			return (emission * reflectedColour * G) / (lightPdf * pmf);
+			return (emission * reflectedColour * G * weight) / (lightPdf * pmf);
 		} else {
 			float lightPdf = 0.0f;
 			// Sample from light, returns direction instead of point
@@ -105,7 +109,10 @@ public:
 
 			// Evaluate BSDF and multiply terms and return 
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
-			return (emission * reflectedColour * cosTheta) / (lightPdf * pmf);
+			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+			float weight = powerHeuristic(lightPdf, bsdfPdf);
+
+			return  (emission * reflectedColour * cosTheta * weight) / (lightPdf * pmf);
 		}
 	}
 
@@ -148,17 +155,10 @@ public:
 			if (depth >= 3) {
 				float continueProbability = std::min(nextPaththroughput.Lum(), 0.95f);
 
-				if (continueProbability <= 0.0f) {
-					return Lo;
-				}
-
-				if (sampler->next() > continueProbability) {
-					return Lo;
-				}
+				if (continueProbability <= 0.0f || sampler->next() > continueProbability) return Lo;
 
 				nextPaththroughput = nextPaththroughput / continueProbability;
 			}
-
 
 			Ray nextRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
 			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler);
