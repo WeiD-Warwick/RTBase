@@ -57,7 +57,7 @@ public:
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 
-		// Check if light is area or environment map
+		// Area Angle Sampling
 		if (light->isArea()) {
 			float lightPdf = 0.0f;
 			// Sample point on light and store returned emission
@@ -87,7 +87,25 @@ public:
 
 			return (emission * F * G) / (lightPdf * pmf);
 		} else {
-			return Colour(0.0f, 0.0f, 0.0f);
+			float lightPdf = 0.0f;
+			// Sample from light, returns direction instead of point
+			Vec3 shadowRayDir = light->sample(shadingData, sampler, lightPdf);
+			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+			Vec3 wi = shadowRayDir.normalize();
+			Colour emission = light->evaluate(wi);
+
+			// Evaluate visibility to outside scene bounds
+			Ray shadowRay(shadingData.x, wi);
+			IntersectionData shadowHit = scene->traverse(shadowRay);
+			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
+
+			// Evaluate Geometry Term for environment maps 
+			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
+			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+
+			// Evaluate BSDF and multiply terms and return 
+			Colour F = shadingData.bsdf->evaluate(shadingData, wi);
+			return (emission * F * cosTheta) / (lightPdf * pmf);
 		}
 	}
 
