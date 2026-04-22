@@ -60,13 +60,12 @@ public:
 		// Check if light is area or environment map
 		if (light->isArea()) {
 			float lightPdf = 0.0f;
-			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
-
 			// Sample point on light and store returned emission
 			Vec3 sampleLightPoint = light->sample(shadingData, sampler, lightPdf);
+			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			Vec3 shadowRayDir = sampleLightPoint - shadingData.x;
 			Vec3 wi = shadowRayDir.normalize();
-			Colour emission = light->evaluate(-wi);
+			Colour emission = light->evaluate(wi);
 			
 			// Calculate visibility
 			bool visible = scene->visible(shadingData.x, sampleLightPoint);
@@ -76,7 +75,11 @@ public:
 			// Mento Carlo 65
 			Vec3 lightNormal = light->normal(shadingData, -wi);
 			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
+			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+
 			float cosThetaPrime = std::max(Dot(-wi, lightNormal), 0.0f);
+			if (cosThetaPrime <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+
 			float G = cosTheta * cosThetaPrime / shadowRayDir.lengthSq();
 
 			// Evaluate BSDF
