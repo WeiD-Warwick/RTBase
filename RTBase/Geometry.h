@@ -105,6 +105,8 @@ public:
 
 	Vec3 sample(Sampler* sampler, float& pdf) {
 
+		// MonteCarlo 137
+
 		float r1 = sampler->next();
 		float r2 = sampler->next();
 

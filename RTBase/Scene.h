@@ -120,9 +120,8 @@ public:
 			return NULL;
 		}
 
-		float r1 = sampler->next();
-
-		int lightIndex = lights.size() * r1;
+		float r = sampler->next();
+		int lightIndex = lights.size() * r;
 
 		pmf = 1.0f / lights.size();
 

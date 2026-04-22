@@ -46,10 +46,11 @@ void runTests()
 int main(int argc, char *argv[])
 {
 	// Add call to tests if required
-	runTests();
+	//runTests();
 	
 	// Initialize default parameters
 	std::string sceneName = "cornell-box";
+	//std::string sceneName = "bathroom";
 	std::string filename = "GI.hdr";
 	unsigned int SPP = 8192;
 	//unsigned int SPP = 50000;

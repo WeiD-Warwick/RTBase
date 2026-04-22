@@ -43,14 +43,13 @@ public:
 	}
 
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler) {
-
-		// Compute direct lighting here
-
-		// Is surface is specular we cannot computing direct lighting
+		// Only non-specular surfaces can connect
 		if (shadingData.bsdf->isPureSpecular() == true) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 
+		// Light Transport 159
+		// sample light
 		float pmf = 0.f;
 		Light* light = scene->sampleLight(sampler, pmf);
 
@@ -58,38 +57,32 @@ public:
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 
+		// Check if light is area or environment map
 		if (light->isArea()) {
-			Colour emittedColour;
 			float lightPdf = 0.0f;
-			Vec3 p_light = light->sample(shadingData, sampler, emittedColour, lightPdf);
-
 			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
-			Vec3 shadowRayDir = p_light - shadingData.x;
-			float r2 = shadowRayDir.lengthSq();
-			float r = sqrtf(r2);
-			Vec3 wi = shadowRayDir / r;
+			// Sample point on light and store returned emission
+			Vec3 sampleLightPoint = light->sample(shadingData, sampler, lightPdf);
+			Vec3 shadowRayDir = sampleLightPoint - shadingData.x;
+			Vec3 wi = shadowRayDir.normalize();
+			Colour emission = light->evaluate(-wi);
+			
+			// Calculate visibility
+			bool visible = scene->visible(shadingData.x, sampleLightPoint);
+			if (!visible) return Colour(0.0f, 0.0f, 0.0f);
 
-			// normal offset to fix self-occlusion
-			Vec3 offsetOrigin = shadingData.x + shadingData.sNormal * 1e-4f;
-
-			if (!scene->visible(offsetOrigin, p_light)) {
-				return Colour(0.0f, 0.0f, 0.0f);
-			}
-
-			float cosTheta = std::max(0.0f, Dot(shadingData.sNormal, wi));
-
+			// Calculate Geometry Term 
+			// Mento Carlo 65
 			Vec3 lightNormal = light->normal(shadingData, -wi);
-			float cosThetaPrime = std::max(0.0f, Dot(lightNormal, -wi));
+			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
+			float cosThetaPrime = std::max(Dot(-wi, lightNormal), 0.0f);
+			float G = cosTheta * cosThetaPrime / shadowRayDir.lengthSq();
 
-			if (cosTheta <= 0.0f || cosThetaPrime <= 0.0f) {
-				return Colour(0.0f, 0.0f, 0.0f);
-			}
+			// Evaluate BSDF
+			Colour F = shadingData.bsdf->evaluate(shadingData, wi);
 
-			float G = (cosTheta * cosThetaPrime) / r2;
-			Colour f_r = shadingData.bsdf->evaluate(shadingData, wi);
-
-			return (emittedColour * f_r * G) / (lightPdf * pmf);
+			return (emission * F * G) / (lightPdf * pmf);
 		} else {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
@@ -119,9 +112,9 @@ public:
 		
 		Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
 
-		Colour reflectedColour;
 		float pdf = 0;
-		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);
+		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, pdf);
+		Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
 
 		if (pdf <= 0) return Lo;
 
