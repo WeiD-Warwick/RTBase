@@ -11,6 +11,7 @@
 // Environment CDF
 // BVH
 // PathTracing
+// Sphere interaction
 
 void runTests()
 {

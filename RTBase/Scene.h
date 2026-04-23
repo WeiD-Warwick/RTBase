@@ -174,6 +174,7 @@ public:
 		{
 			shadingData.x = ray.at(intersection.t);
 			shadingData.gNormal = triangles[intersection.ID].gNormal();
+			shadingData.x = shadingData.x + shadingData.gNormal * EPSILON;
 			triangles[intersection.ID].interpolateAttributes(intersection.alpha, intersection.beta, intersection.gamma, shadingData.sNormal, shadingData.tu, shadingData.tv);
 			shadingData.bsdf = materials[triangles[intersection.ID].materialIndex];
 			shadingData.wo = -ray.dir;
