@@ -107,8 +107,7 @@ public:
 
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		float cosTheta = wiLocal.z;
-		if (cosTheta <= 0.0f) {
+		if (wiLocal.z <= 0.0f) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 		// ρ / π
@@ -118,8 +117,7 @@ public:
 	float PDF(const ShadingData& shadingData, const Vec3& wi) {
 		// Cosine hemisphere PDF
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		float cosTheta = wiLocal.z;
-		if (cosTheta <= 0.0f) {
+		if (wiLocal.z <= 0.0f) {
 			return 0.0f;
 		}
 		return SamplingDistributions::cosineHemispherePDF(wiLocal);
@@ -184,7 +182,6 @@ public:
 		return albedo->sampleAlpha(shadingData.tu, shadingData.tv);
 	}
 };
-
 
 class ConductorBSDF : public BSDF
 {
@@ -363,23 +360,55 @@ public:
 		albedo = _albedo;
 		sigma = _sigma;
 	}
-	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf)
-	{
-		// Replace this with OrenNayar sampling code
-		Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-		pdf = wi.z / M_PI;
-		wi = shadingData.frame.toWorld(wi);
-		return wi;
+	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf) {
+		Vec3 wiLocal = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
+		pdf = SamplingDistributions::cosineHemispherePDF(wiLocal);
+		return shadingData.frame.toWorld(wiLocal);
 	}
-	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
-	{
-		// Replace this with OrenNayar evaluation code
-		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
-	}
-	float PDF(const ShadingData& shadingData, const Vec3& wi)
-	{
-		// Replace this with OrenNayar PDF
+	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+
+		if (wiLocal.z <= 0.0f || woLocal.z <= 0.0f) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		Colour lambert = albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
+		float sigmaSq = sigma * sigma;
+
+		float A = 1.0f - sigmaSq / (2.0f * (sigmaSq + 0.33f));
+		float B = 0.45f * sigmaSq / (sigmaSq + 0.09f);
+
+		float cosThetaI = wiLocal.z;
+		float cosThetaO = woLocal.z;
+
+		float sinThetaI = sqrtf(1.0f - cosThetaI * cosThetaI);
+		float sinThetaO = sqrtf(1.0f - cosThetaO * cosThetaO);
+
+		float sinAlpha, tanBeta;
+
+		if (cosThetaI > cosThetaO) {
+			// theta_i < theta_o
+			sinAlpha = sinThetaO;
+			tanBeta = sinThetaI / cosThetaI;
+		}
+		else {
+			sinAlpha = sinThetaI;
+			tanBeta = sinThetaO / cosThetaO;
+		}
+
+		float cosPhiDiff = (wiLocal.x * woLocal.x + wiLocal.y * woLocal.y) / (sinThetaI * sinThetaO);
+		cosPhiDiff = std::max(-1.0f, std::min(1.0f, cosPhiDiff));
+
+		float orenNayar = A + B * std::max(0.0f, cosPhiDiff) * sinAlpha * tanBeta;
+
+		return lambert * orenNayar;
+	}
+	float PDF(const ShadingData& shadingData, const Vec3& wi) {
+		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		if (wiLocal.z <= 0.0f) {
+			return 0.0f;
+		}
 		return SamplingDistributions::cosineHemispherePDF(wiLocal);
 	}
 	bool isPureSpecular()

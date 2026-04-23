@@ -190,9 +190,30 @@ public:
 		centre = _centre;
 		radius = _radius;
 	}
-	// Add code here
+
 	bool rayIntersect(Ray& r, float& t)
 	{
+		Vec3 oc = r.o - centre;
+		float a = Dot(r.dir, r.dir);
+		float b = 2.0f * Dot(oc, r.dir);
+		float c = Dot(oc, oc) - radius * radius;
+		float disc = b * b - 4.0f * a * c;
+		if (disc < 0.0f) {
+			return false;
+		}
+
+		float s = sqrtf(disc);
+		float inv2a = 0.5f / a;
+		float t0 = (-b - s) * inv2a;
+		float t1 = (-b + s) * inv2a;
+		if (t0 > EPSILON) {
+			t = t0;
+			return true;
+		}
+		if (t1 > EPSILON) {
+			t = t1;
+			return true;
+		}
 		return false;
 	}
 };
@@ -228,18 +249,20 @@ public:
 		_count = 0;
 	}
 
+	~BVHNode() {
+		if (l) delete l;
+		if (r) delete r;
+	}
+
 	bool isLeaf() const {
 		return l == NULL && r == NULL;
 	}
 
-	// Note there are several options for how to implement the build method. Update this as required
 	void build(std::vector<Triangle>& inputTriangles) {
-		// Add BVH building code here
 		buildRecursive(inputTriangles, 0, inputTriangles.size());
 	}
 
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection) {
-		// Add BVH Traversal code here
 		float boxT;
 		if (!bounds.rayAABB(ray, boxT)) return;
 		if (boxT > intersection.t) return;
@@ -291,7 +314,6 @@ public:
 	}
 
 	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, const float maxT) {
-		// Add visibility code here
 		float boxT;
 		if (!bounds.rayAABB(ray, boxT)) 
 			return true;

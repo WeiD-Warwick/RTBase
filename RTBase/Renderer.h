@@ -151,11 +151,9 @@ public:
 	}
 
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler, const ShadingData* prevShadingData, float prevBsdfPdf) {
-		// Get Shading Point
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 
-		// non intersection
 		if (shadingData.t >= FLT_MAX) {
 			Colour Le = scene->background->evaluate(r.dir);
 			// First time or from specular, return Le
