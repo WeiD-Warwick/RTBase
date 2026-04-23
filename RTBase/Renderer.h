@@ -42,6 +42,7 @@ public:
 		film->clear();
 	}
 
+	// NEE
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler) {
 		// Only non-specular surfaces can connect
 		if (shadingData.bsdf->isPureSpecular() == true) {
@@ -50,19 +51,23 @@ public:
 
 		// Light Transport 159
 		// sample light
-		float pmf = 0.f;
-		Light* light = scene->sampleLight(sampler, pmf);
+		float LightPmf = 0.f;
+		Light* light = scene->sampleLight(sampler, LightPmf);
 
-		if (light == NULL || pmf <= 0.0f) {
+		if (light == NULL || LightPmf <= 0.0f) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 
+		float lightPdf = 0.0f;
+		auto lightSampleValue = light->sample(shadingData, sampler, lightPdf);
+		if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+		// total sample light pdf
+		lightPdf *= LightPmf;
+
 		// Area Angle Sampling
 		if (light->isArea()) {
-			float lightPdf = 0.0f;
 			// Sample point on light and store returned emission
-			Vec3 sampleLightPoint = light->sample(shadingData, sampler, lightPdf);
-			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+			Vec3 sampleLightPoint = lightSampleValue;
 			Vec3 shadowRayDir = sampleLightPoint - shadingData.x;
 			Vec3 wi = shadowRayDir.normalize();
 			Colour emission = light->evaluate(wi);
@@ -71,12 +76,10 @@ public:
 			bool visible = scene->visible(shadingData.x, sampleLightPoint);
 			if (!visible) return Colour(0.0f, 0.0f, 0.0f);
 
-			// Calculate Geometry Term
-			// Mento Carlo 65
+			// Calculate Geometry Term (Mento Carlo 65)
 			Vec3 lightNormal = light->normal(shadingData, -wi);
 			float cosTheta = std::max(Dot(wi, shadingData.sNormal), 0.0f);
 			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
-
 			float cosThetaPrime = std::max(Dot(-wi, lightNormal), 0.0f);
 			if (cosThetaPrime <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
@@ -85,21 +88,20 @@ public:
 			// Evaluate BSDF
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
 			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
-			// convert to same domains
 			float bsdfPdfArea = bsdfPdf * cosThetaPrime / shadowRayDir.lengthSq();
+
+			// MIS Weight
 			float weight = powerHeuristic(lightPdf, bsdfPdfArea);
 
-			return (emission * reflectedColour * G * weight) / (lightPdf * pmf);
+			return (emission * reflectedColour * G * weight) / lightPdf;
 		} else {
-			float lightPdf = 0.0f;
-			// Sample from light, returns direction instead of point
-			Vec3 shadowRayDir = light->sample(shadingData, sampler, lightPdf);
-			if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+			Vec3 shadowRayDir = lightSampleValue;
+
 			Vec3 wi = shadowRayDir.normalize();
 			Colour emission = light->evaluate(wi);
 
 			// Evaluate visibility to outside scene bounds
-			Ray shadowRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
+			Ray shadowRay(shadingData.x, wi);
 			IntersectionData shadowHit = scene->traverse(shadowRay);
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
@@ -110,26 +112,75 @@ public:
 			// Evaluate BSDF and multiply terms and return 
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
 			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+
+			// MIS Weight
 			float weight = powerHeuristic(lightPdf, bsdfPdf);
 
-			return  (emission * reflectedColour * cosTheta * weight) / (lightPdf * pmf);
+			return (emission * reflectedColour * cosTheta * weight) / lightPdf;
 		}
 	}
 
-	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler) {
+	float lightPdfFromPrevPoint(const ShadingData& prevShadingData, const ShadingData& shadingData, const Vec3& wi, int hitTriangleID) {
+		if (scene->lights.empty()) return 0.0f;
+
+		float lightPmf = scene->lightPMF();
+
+		if (shadingData.t >= FLT_MAX) {
+			return scene->background->PDF(prevShadingData, wi) * lightPmf;
+		}
+
+		if (!shadingData.bsdf->isLight()) return 0.0f;
+
+		if (hitTriangleID < 0 || hitTriangleID >= (int)scene->triangles.size()) return 0.0f;
+
+		Triangle* hitTriangle = &scene->triangles[hitTriangleID];
+
+		AreaLight tempLight;
+		tempLight.triangle = hitTriangle;
+		float pdfArea = tempLight.PDF(prevShadingData, wi);
+		if (pdfArea <= 0.0f) return 0.0f;
+
+		Vec3 lightNormal = hitTriangle->gNormal();
+		float dist2 = (shadingData.x - prevShadingData.x).lengthSq();
+		float cosThetaPrime = std::max(Dot(-wi, lightNormal), 0.0f);
+		if (cosThetaPrime <= 0.0f) return 0.0f;
+
+		float pdfOmega = pdfArea * dist2 / cosThetaPrime;
+		return pdfOmega * lightPmf;
+	}
+
+	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler, const ShadingData* prevShadingData, float prevBsdfPdf) {
 		// Get Shading Point
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 
+		// non intersection
 		if (shadingData.t >= FLT_MAX) {
-			return pathThroughput * scene->background->evaluate(r.dir);
+			Colour Le = scene->background->evaluate(r.dir);
+			// First time or from specular, return Le
+			if (depth == 0 || prevShadingData->bsdf->isPureSpecular()) {
+				return pathThroughput * Le;
+			}
+			float lightPdf = lightPdfFromPrevPoint(*prevShadingData, shadingData, r.dir, -1);
+			float weight = powerHeuristic(prevBsdfPdf, lightPdf);
+			return pathThroughput * Le * weight;
 		}
 
+		// hit light
 		if (shadingData.bsdf->isLight()) {
 			if (depth == 0) {
 				return pathThroughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
 			}
-			return Colour(0, 0, 0);
+			if (Dot(r.dir, shadingData.gNormal) < 0.0f) {
+				return Colour(0.0f, 0.0f, 0.0f);
+			}
+			Colour Le = shadingData.bsdf->emit(shadingData, shadingData.wo);
+			if (prevShadingData->bsdf->isPureSpecular()) {
+				return pathThroughput * Le;
+			}
+			float lightPdf = lightPdfFromPrevPoint(*prevShadingData, shadingData, r.dir, intersection.ID);
+			float weight = powerHeuristic(prevBsdfPdf, lightPdf);
+			return pathThroughput * Le * weight;
 		}
 		else {
 			// multiply continuously along the path (pathThroughput * Fr * cosTheta / pdf)
@@ -154,14 +205,12 @@ public:
 			// Light TracePath 199
 			if (depth >= 3) {
 				float continueProbability = std::min(nextPaththroughput.Lum(), 0.95f);
-
 				if (continueProbability <= 0.0f || sampler->next() > continueProbability) return Lo;
-
 				nextPaththroughput = nextPaththroughput / continueProbability;
 			}
 
-			Ray nextRay(shadingData.x + shadingData.sNormal * EPSILON, wi);
-			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler);
+			Ray nextRay(shadingData.x, wi);
+			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler, &shadingData, pdf);
 		}
 	}
 
@@ -237,7 +286,7 @@ public:
 							//Colour col = direct(ray, &samplers[i]);
 
 							Colour pathThroughput = Colour(1, 1, 1);
-							Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i]);
+							Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
 
 							film->splat(px, py, col);
 							unsigned char r, g, b;

@@ -123,9 +123,13 @@ public:
 		float r = sampler->next();
 		int lightIndex = lights.size() * r;
 
-		pmf = 1.0f / lights.size();
+		pmf = lightPMF();
 
 		return lights[lightIndex];
+	}
+
+	float lightPMF() {
+		return 1.0f / lights.size();
 	}
 
 	// Do not modify any code below this line
@@ -152,9 +156,9 @@ public:
 	bool visible(const Vec3& p1, const Vec3& p2) {
 		Ray ray;
 		Vec3 dir = p2 - p1;
-		float maxT = dir.length() - (2.0f * EPSILON);
+		float maxT = dir.length();
 		dir = dir.normalize();
-		ray.init(p1 + (dir * EPSILON), dir);
+		ray.init(p1, dir);
 
 		return bvh->traverseVisible(ray, triangles, maxT);
 	}

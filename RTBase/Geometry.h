@@ -260,8 +260,27 @@ public:
 			return;
 		}
 
-		if (l) l->traverse(ray, triangles, intersection);
-		if (r) r->traverse(ray, triangles, intersection);
+		float leftT = FLT_MAX;
+		float rightT = FLT_MAX;
+		bool hitLeft = l && l->bounds.rayAABB(ray, leftT) && leftT <= intersection.t;
+		bool hitRight = r && r->bounds.rayAABB(ray, rightT) && rightT <= intersection.t;
+
+		if (hitLeft && hitRight) {
+			if (leftT < rightT) {
+				l->traverse(ray, triangles, intersection);
+				if (rightT <= intersection.t) r->traverse(ray, triangles, intersection);
+			}
+			else {
+				r->traverse(ray, triangles, intersection);
+				if (leftT <= intersection.t) l->traverse(ray, triangles, intersection);
+			}
+		}
+		else if (hitLeft) {
+			l->traverse(ray, triangles, intersection);
+		}
+		else if (hitRight) {
+			r->traverse(ray, triangles, intersection);
+		}
 	}
 
 	IntersectionData traverse(const Ray& ray, const std::vector<Triangle>& triangles) {
@@ -292,11 +311,27 @@ public:
 			return true;
 		}
 
-		if (l && !l->traverseVisible(ray, triangles, maxT))
-			return false;
+		float leftT = FLT_MAX;
+		float rightT = FLT_MAX;
+		bool hitLeft = l && l->bounds.rayAABB(ray, leftT) && leftT <= maxT;
+		bool hitRight = r && r->bounds.rayAABB(ray, rightT) && rightT <= maxT;
 
-		if (r && !r->traverseVisible(ray, triangles, maxT))
-			return false;
+		if (hitLeft && hitRight) {
+			if (leftT < rightT) {
+				if (!l->traverseVisible(ray, triangles, maxT)) return false;
+				if (!r->traverseVisible(ray, triangles, maxT)) return false;
+			}
+			else {
+				if (!r->traverseVisible(ray, triangles, maxT)) return false;
+				if (!l->traverseVisible(ray, triangles, maxT)) return false;
+			}
+		}
+		else if (hitLeft) {
+			if (!l->traverseVisible(ray, triangles, maxT)) return false;
+		}
+		else if (hitRight) {
+			if (!r->traverseVisible(ray, triangles, maxT)) return false;
+		}
 
 		return true;
 	}
@@ -319,6 +354,13 @@ private:
 
 		Vec3 size = bounds.max - bounds.min;
 		int axis = 0;
+
+		if (size.y > size.x && size.y >= size.z) {
+			axis = 1;
+		}
+		else if (size.z > size.x && size.z > size.y) {
+			axis = 2;
+		}
 
 		auto axisValue = [axis](const Triangle& t) -> float {
 			Vec3 centre = t.centre();

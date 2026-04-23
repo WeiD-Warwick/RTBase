@@ -7,6 +7,11 @@
 #include "GamesEngineeringBase.h"
 #include <unordered_map>
 
+// TODO
+// Environment CDF
+// BVH
+// PathTracing
+
 void runTests()
 {
 	// Plane test
@@ -49,8 +54,11 @@ int main(int argc, char *argv[])
 	//runTests();
 	
 	// Initialize default parameters
-	std::string sceneName = "cornell-box";
-	//std::string sceneName = "bathroom";
+	//std::string sceneName = "cornell-box";
+	std::string sceneName = "bathroom";
+	//std::string sceneName = "bathroom2";
+	//std::string sceneName = "glass-of-water";
+	//std::string sceneName = "MaterialsScene";
 	std::string filename = "GI.hdr";
 	unsigned int SPP = 8192;
 	//unsigned int SPP = 50000;

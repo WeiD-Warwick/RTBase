@@ -36,8 +36,16 @@ class ShadingHelper
 public:
 	static float fresnelDielectric(float cosTheta, float iorInt, float iorExt)
 	{
-		// Add code here
-		return 1.0f;
+		float etaI = iorExt, etaT = iorInt;
+		float c = cosTheta;
+		if (c < 0.0f) { std::swap(etaI, etaT); c = -c; }
+		float eta = etaI / etaT;
+		float sin2T = eta * eta * (1.0f - c * c);
+		if (sin2T > 1.0f) return 1.0f;
+		float cosT = sqrtf(1.0f - sin2T);
+		float rs = (etaI * c - etaT * cosT) / (etaI * c + etaT * cosT);
+		float rp = (etaT * c - etaI * cosT) / (etaT * c + etaI * cosT);
+		return 0.5f * (rs * rs + rp * rp);
 	}
 	static Colour fresnelConductor(float cosTheta, Colour ior, Colour k)
 	{
@@ -96,43 +104,32 @@ public:
 	}
 
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf) {
-		Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-		pdf = SamplingDistributions::cosineHemispherePDF(wi);
-		return shadingData.frame.toWorld(wi);
+		// Sample cosine term
+		Vec3 wiLocal = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
+		pdf = SamplingDistributions::cosineHemispherePDF(wiLocal);
+		return shadingData.frame.toWorld(wiLocal);
 	}
 
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
-		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-
-		if (wiLocal.z <= 0.0f) {
-			return Colour(0.0f, 0.0f, 0.0f);
-		}
-
+		// ρ / π
 		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
 	}
 	
 	float PDF(const ShadingData& shadingData, const Vec3& wi) {
+		// Cosine hemisphere PDF
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-
-		if (wiLocal.z <= 0.0f) {
-			return 0.0f;
-		}
-
 		return SamplingDistributions::cosineHemispherePDF(wiLocal);
 	}
 
-	bool isPureSpecular()
-	{
+	bool isPureSpecular() {
 		return false;
 	}
 
-	bool isTwoSided()
-	{
+	bool isTwoSided() {
 		return true;
 	}
 
-	float mask(const ShadingData& shadingData)
-	{
+	float mask(const ShadingData& shadingData) {
 		return albedo->sampleAlpha(shadingData.tu, shadingData.tv);
 	}
 };
@@ -142,39 +139,39 @@ class MirrorBSDF : public BSDF
 public:
 	Texture* albedo;
 	MirrorBSDF() = default;
-	MirrorBSDF(Texture* _albedo)
-	{
+	MirrorBSDF(Texture* _albedo) {
 		albedo = _albedo;
 	}
-	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf)
-	{
-		// Replace this with Mirror sampling code
-		Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-		pdf = wi.z / M_PI;
-		wi = shadingData.frame.toWorld(wi);
-		return wi;
+	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf) {
+		// Material 23
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+		Vec3 wiLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+
+		pdf = 1.0f;
+		return shadingData.frame.toWorld(wiLocal);
 	}
-	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
-	{
-		// Replace this with Mirror evaluation code
-		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
-	}
-	float PDF(const ShadingData& shadingData, const Vec3& wi)
-	{
-		// Replace this with Mirror PDF
+	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		return SamplingDistributions::cosineHemispherePDF(wiLocal);
+
+		Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+
+		if (wi.z <= 0.0f) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		return albedo->sample(shadingData.tu, shadingData.tv) / wi.z;
+
 	}
-	bool isPureSpecular()
-	{
+	float PDF(const ShadingData& shadingData, const Vec3& wi) {
+		return 0.0f;
+	}
+	bool isPureSpecular() {
 		return true;
 	}
-	bool isTwoSided()
-	{
+	bool isTwoSided() {
 		return true;
 	}
-	float mask(const ShadingData& shadingData)
-	{
+	float mask(const ShadingData& shadingData) {
 		return albedo->sampleAlpha(shadingData.tu, shadingData.tv);
 	}
 };
@@ -243,22 +240,46 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, float& pdf)
 	{
-		// Replace this with Glass sampling code
-		Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-		pdf = wi.z / M_PI;
-		wi = shadingData.frame.toWorld(wi);
-		return wi;
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+		float F = ShadingHelper::fresnelDielectric(woLocal.z, intIOR, extIOR);
+		Vec3 wiLocal;
+		if (sampler->next() < F) {
+			wiLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+			pdf = F;
+		}
+		else {
+			bool entering = woLocal.z > 0.0f;
+			float etaI = entering ? extIOR : intIOR;
+			float etaT = entering ? intIOR : extIOR;
+			float eta = etaI / etaT;
+			float cosI = fabsf(woLocal.z);
+			float sin2T = eta * eta * (1.0f - cosI * cosI);
+			if (sin2T >= 1.0f) {
+				wiLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+				pdf = 1.0f;
+			}
+			else {
+				float cosT = sqrtf(1.0f - sin2T);
+				wiLocal = Vec3(-eta * woLocal.x, -eta * woLocal.y, entering ? -cosT : cosT);
+				pdf = 1.0f - F;
+			}
+		}
+		return shadingData.frame.toWorld(wiLocal);
 	}
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with Glass evaluation code
-		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		Colour tint = albedo->sample(shadingData.tu, shadingData.tv);
+		float F = ShadingHelper::fresnelDielectric(woLocal.z, intIOR, extIOR);
+		if (wiLocal.z * woLocal.z > 0.0f) return tint * (F / fabsf(wiLocal.z));
+		float etaI = woLocal.z > 0.0f ? extIOR : intIOR;
+		float etaT = woLocal.z > 0.0f ? intIOR : extIOR;
+		return tint * (((1.0f - F) * (etaT * etaT) / (etaI * etaI)) / fabsf(wiLocal.z));
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with GlassPDF
-		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		return SamplingDistributions::cosineHemispherePDF(wiLocal);
+		return 0.0f;
 	}
 	bool isPureSpecular()
 	{
@@ -266,7 +287,7 @@ public:
 	}
 	bool isTwoSided()
 	{
-		return false;
+		return true;
 	}
 	float mask(const ShadingData& shadingData)
 	{
