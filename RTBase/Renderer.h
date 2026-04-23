@@ -88,7 +88,7 @@ public:
 
 			// Evaluate BSDF
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
-			float bsdfPdf = std::max(shadingData.bsdf->PDF(shadingData, wi), 0.0f);
+			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
 			float bsdfPdfArea = bsdfPdf * cosThetaPrime / shadowRayDir.lengthSq();
 
 			// MIS Weight
