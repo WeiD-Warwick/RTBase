@@ -63,6 +63,7 @@ public:
 		if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 		// total sample light pdf
 		lightPdf *= LightPmf;
+		if (lightPdf <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
 		// Area Angle Sampling
 		if (light->isArea()) {
@@ -87,7 +88,7 @@ public:
 
 			// Evaluate BSDF
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
-			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+			float bsdfPdf = std::max(shadingData.bsdf->PDF(shadingData, wi), 0.0f);
 			float bsdfPdfArea = bsdfPdf * cosThetaPrime / shadowRayDir.lengthSq();
 
 			// MIS Weight
@@ -162,6 +163,7 @@ public:
 				return pathThroughput * Le;
 			}
 			float lightPdf = lightPdfFromPrevPoint(*prevShadingData, shadingData, r.dir, -1);
+
 			float weight = powerHeuristic(prevBsdfPdf, lightPdf);
 			return pathThroughput * Le * weight;
 		}
@@ -183,8 +185,6 @@ public:
 			return pathThroughput * Le * weight;
 		}
 		else {
-			// multiply continuously along the path (pathThroughput * Fr * cosTheta / pdf)
-
 			// Direct Light (NEE)
 			Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
 

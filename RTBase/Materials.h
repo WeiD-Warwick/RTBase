@@ -34,8 +34,7 @@ public:
 class ShadingHelper
 {
 public:
-	static float fresnelDielectric(float cosTheta, float iorInt, float iorExt)
-	{
+	static float fresnelDielectric(float cosTheta, float iorInt, float iorExt) {
 		float etaI = iorExt, etaT = iorInt;
 		float c = cosTheta;
 		if (c < 0.0f) { std::swap(etaI, etaT); c = -c; }
@@ -47,23 +46,19 @@ public:
 		float rp = (etaT * c - etaI * cosT) / (etaT * c + etaI * cosT);
 		return 0.5f * (rs * rs + rp * rp);
 	}
-	static Colour fresnelConductor(float cosTheta, Colour ior, Colour k)
-	{
+	static Colour fresnelConductor(float cosTheta, Colour ior, Colour k) {
 		// Add code here
 		return Colour(1.0f, 1.0f, 1.0f);
 	}
-	static float lambdaGGX(Vec3 wi, float alpha)
-	{
+	static float lambdaGGX(Vec3 wi, float alpha) {
 		// Add code here
 		return 1.0f;
 	}
-	static float Gggx(Vec3 wi, Vec3 wo, float alpha)
-	{
+	static float Gggx(Vec3 wi, Vec3 wo, float alpha) {
 		// Add code here
 		return 1.0f;
 	}
-	static float Dggx(Vec3 h, float alpha)
-	{
+	static float Dggx(Vec3 h, float alpha) {
 		// Add code here
 		return 1.0f;
 	}
@@ -111,6 +106,11 @@ public:
 	}
 
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
+		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		float cosTheta = wiLocal.z;
+		if (cosTheta <= 0.0f) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
 		// ρ / π
 		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
 	}
@@ -118,6 +118,10 @@ public:
 	float PDF(const ShadingData& shadingData, const Vec3& wi) {
 		// Cosine hemisphere PDF
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		float cosTheta = wiLocal.z;
+		if (cosTheta <= 0.0f) {
+			return 0.0f;
+		}
 		return SamplingDistributions::cosineHemispherePDF(wiLocal);
 	}
 
@@ -150,17 +154,22 @@ public:
 		pdf = 1.0f;
 		return shadingData.frame.toWorld(wiLocal);
 	}
+
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi) {
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 
 		Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
 
-		if (wi.z <= 0.0f) {
+		Vec3 delta = wiLocal - wrLocal;
+
+		if (wiLocal.z <= 0.0f) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
-		return albedo->sample(shadingData.tu, shadingData.tv) / wi.z;
-
+		if (delta.lengthSq() > 1e-6f) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		return albedo->sample(shadingData.tu, shadingData.tv) / wiLocal.z;
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi) {
 		return 0.0f;
