@@ -98,8 +98,8 @@ public:
 
 			// Calculate Geometry Term (Mento Carlo 65)
 			
-			float cosTheta = Dot(wi, shadingData.gNormal);
-			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
+			float cosTheta = Dot(wi, shadingData.sNormal);
+			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
 			Vec3 lightNormal = light->normal(shadingData, -wi);
@@ -134,7 +134,7 @@ public:
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
 			// Evaluate Geometry Term for environment maps 
-			float cosTheta = Dot(wi, shadingData.gNormal);
+			float cosTheta = Dot(wi, shadingData.sNormal);
 			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
@@ -229,7 +229,7 @@ public:
 				nextPaththroughput = nextPaththroughput / continueProbability;
 			}
 
-			Ray nextRay(shadingData.x, wi);
+			Ray nextRay(shadingData.x + wi * EPSILON, wi);
 			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler, &shadingData, pdf);
 		}
 	}
