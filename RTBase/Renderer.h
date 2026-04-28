@@ -115,7 +115,7 @@ public:
 			float bsdfPdfArea = bsdfPdf * cosThetaPrime / shadowRayDir.lengthSq();
 
 			// MIS Weight
-			float weight = balanceHeuristic(lightPdf, bsdfPdfArea);
+			float weight = powerHeuristic(lightPdf, bsdfPdfArea);
 
 			return (emission * reflectedColour * G * weight) / lightPdf;
 		} else {
@@ -143,7 +143,7 @@ public:
 			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
 
 			// MIS Weight
-			float weight = balanceHeuristic(lightPdf, bsdfPdf);
+			float weight = powerHeuristic(lightPdf, bsdfPdf);
 			return (envColour * reflectedColour * absCosTheta * weight) / lightPdf;
 		}
 	}
@@ -185,7 +185,7 @@ public:
 				return pathThroughput * Le;
 			}
 			float lightPdfW = lightPdfFromPrevPoint(*prevShadingData, shadingData, r.dir, -1);
-			float weight = balanceHeuristic(prevBsdfPdf, lightPdfW);
+			float weight = powerHeuristic(prevBsdfPdf, lightPdfW);
 			return pathThroughput * Le * weight;
 		}
 
@@ -201,7 +201,7 @@ public:
 				return pathThroughput * Le;
 			}
 			float lightPdfW = lightPdfFromPrevPoint(*prevShadingData, shadingData, r.dir, intersection.ID);
-			float weight = balanceHeuristic(prevBsdfPdf, lightPdfW);
+			float weight = powerHeuristic(prevBsdfPdf, lightPdfW);
 			return pathThroughput * Le * weight;
 		}
 		else {
