@@ -240,6 +240,10 @@ public:
 		k = _k;
 		alpha = 1.62142f * sqrtf(roughness);
 	}
+	bool isSmooth()
+	{
+		return alpha <= 0.0f;
+	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
@@ -247,6 +251,13 @@ public:
 			pdf = 0.0f;
 			reflectedColour = Colour(0, 0, 0);
 			return Vec3(0, 0, 1);
+		}
+		if (isSmooth()) {
+			Vec3 wiLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+			Vec3 wiWorld = shadingData.frame.toWorld(wiLocal);
+			reflectedColour = evaluate(shadingData, wiWorld);
+			pdf = 1.0f;
+			return wiWorld;
 		}
 		Vec3 halfwayLocal = SamplingDistributions::sampleGGXVNDF(woLocal, alpha, sampler->next(), sampler->next());
 		Vec3 wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
@@ -265,6 +276,13 @@ public:
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return Colour(0, 0, 0);
+		if (isSmooth()) {
+			Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
+			Vec3 delta = wiLocal - wrLocal;
+			if (delta.lengthSq() > EPSILON) return Colour(0, 0, 0);
+			Colour F = ShadingHelper::fresnelConductor(fabsf(woLocal.z), eta, k);
+			return albedo->sample(shadingData.tu, shadingData.tv) * F / wiLocal.z;
+		}
 		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
 		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
 		float G = ShadingHelper::Gggx(wiLocal, woLocal, alpha);
@@ -278,6 +296,7 @@ public:
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return 0.0f;
+		if (isSmooth()) return 0.0f;
 		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
 		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
 		float pdfHalfway = D * halfwayLocal.z;
@@ -286,7 +305,7 @@ public:
 	}
 	bool isPureSpecular()
 	{
-		return false;
+		return isSmooth();
 	}
 	bool isTwoSided()
 	{
