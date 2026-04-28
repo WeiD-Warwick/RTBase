@@ -36,47 +36,51 @@ class ShadingHelper
 public:
 	static float fresnelDielectric(float cosTheta, float iorInt, float iorExt) {
 		cosTheta = std::min(std::max(cosTheta, -1.0f), 1.0f);
-		float etaI = iorExt, etaT = iorInt;
-		float c = cosTheta;
-		if (c < 0.0f) { std::swap(etaI, etaT); c = -c; }
-		float eta = etaI / etaT;
-		float sin2T = eta * eta * std::max(0.0f, 1.0f - c * c);
-		if (sin2T >= 1.0f) return 1.0f;
-		float cosT = sqrtf(std::max(0.0f, 1.0f - sin2T));
-		float rs = (etaI * c - etaT * cosT) / (etaI * c + etaT * cosT);
-		float rp = (etaT * c - etaI * cosT) / (etaT * c + etaI * cosT);
-		return 0.5f * (rs * rs + rp * rp);
+		float incidentIOR = iorExt;
+		float transmittedIOR = iorInt;
+		float cosIncidentTheta = cosTheta;
+		if (cosIncidentTheta < 0.0f) {
+			std::swap(incidentIOR, transmittedIOR);
+			cosIncidentTheta = -cosIncidentTheta;
+		}
+		float eta = incidentIOR / transmittedIOR;
+		float sinTransmittedThetaSq = eta * eta * std::max(0.0f, 1.0f - cosIncidentTheta * cosIncidentTheta);
+		if (sinTransmittedThetaSq >= 1.0f) return 1.0f;
+		float cosTransmittedTheta = sqrtf(std::max(0.0f, 1.0f - sinTransmittedThetaSq));
+		float perpendicularReflectance = (incidentIOR * cosIncidentTheta - transmittedIOR * cosTransmittedTheta) / (incidentIOR * cosIncidentTheta + transmittedIOR * cosTransmittedTheta);
+		float parallelReflectance = (transmittedIOR * cosIncidentTheta - incidentIOR * cosTransmittedTheta) / (transmittedIOR * cosIncidentTheta + incidentIOR * cosTransmittedTheta);
+		return 0.5f * (perpendicularReflectance * perpendicularReflectance + parallelReflectance * parallelReflectance);
 	}
-	static Colour fresnelConductor(float cosTheta, Colour ior, Colour k)
+	static Colour fresnelConductor(float cosTheta, Colour ior, Colour extinction)
 	{
 		cosTheta = std::min(std::max(cosTheta, 0.0f), 1.0f);
-		float cos2 = cosTheta * cosTheta;
-		float sin2 = 1.0f - cos2;
-		auto FrChannel = [&](float eta, float kk) {
-			float eta2 = eta * eta;
-			float k2 = kk * kk;
-			float t0 = eta2 - k2 - sin2;
-			float a2b2 = sqrtf(t0 * t0 + 4.0f * eta2 * k2);
-			float t1 = a2b2 + cos2;
-			float a = sqrtf(0.5f * (a2b2 + t0));
-			float t2 = 2.0f * cosTheta * a;
-			float Rs = (t1 - t2) / (t1 + t2);
+		float cosThetaSq = cosTheta * cosTheta;
+		float sinThetaSq = 1.0f - cosThetaSq;
+		auto fresnelChannel = [&](float eta, float absorption) {
+			float etaSq = eta * eta;
+			float absorptionSq = absorption * absorption;
+			float etaMinusAbsorption = etaSq - absorptionSq - sinThetaSq;
+			float reflectanceBase = sqrtf(etaMinusAbsorption * etaMinusAbsorption + 4.0f * etaSq * absorptionSq);
+			float perpendicularNumerator = reflectanceBase + cosThetaSq;
+			float projectedBase = sqrtf(0.5f * (reflectanceBase + etaMinusAbsorption));
+			float perpendicularDenominatorTerm = 2.0f * cosTheta * projectedBase;
+			float perpendicularReflectance = (perpendicularNumerator - perpendicularDenominatorTerm) / (perpendicularNumerator + perpendicularDenominatorTerm);
 
-			float t3 = cos2 * a2b2 + sin2 * sin2;
-			float t4 = t2 * sin2;
-			float Rp = Rs * (t3 - t4) / (t3 + t4);
-			return 0.5f * (Rp + Rs);
+			float parallelNumerator = cosThetaSq * reflectanceBase + sinThetaSq * sinThetaSq;
+			float parallelDenominatorTerm = perpendicularDenominatorTerm * sinThetaSq;
+			float parallelReflectance = perpendicularReflectance * (parallelNumerator - parallelDenominatorTerm) / (parallelNumerator + parallelDenominatorTerm);
+			return 0.5f * (parallelReflectance + perpendicularReflectance);
 			};
-		return Colour(FrChannel(ior.r, k.r), FrChannel(ior.g, k.g), FrChannel(ior.b, k.b));
+		return Colour(fresnelChannel(ior.r, extinction.r), fresnelChannel(ior.g, extinction.g), fresnelChannel(ior.b, extinction.b));
 	}
 	static float lambdaGGX(Vec3 wi, float alpha)
 	{
 		float absCosTheta = fabsf(wi.z);
-		float sin2Theta = std::max(1.0f - absCosTheta * absCosTheta, 0.0f);
-		if (sin2Theta <= 0.0f) return 0.0f;
-		float tan2Theta = sin2Theta / (absCosTheta * absCosTheta);
-		float alpha2 = alpha * alpha;
-		return (-1.0f + sqrtf(1.0f + alpha2 * tan2Theta)) * 0.5f;
+		float sinThetaSq = std::max(1.0f - absCosTheta * absCosTheta, 0.0f);
+		if (sinThetaSq <= 0.0f) return 0.0f;
+		float tanThetaSq = sinThetaSq / (absCosTheta * absCosTheta);
+		float alphaSq = alpha * alpha;
+		return (-1.0f + sqrtf(1.0f + alphaSq * tanThetaSq)) * 0.5f;
 	}
 	static float Gggx(Vec3 wi, Vec3 wo, float alpha)
 	{
@@ -85,12 +89,12 @@ public:
 	static float Dggx(Vec3 h, float alpha)
 	{
 		if (h.z <= 0.0f) return 0.0f;
-		float alpha2 = alpha * alpha;
-		float cos2 = h.z * h.z;
-		float tan2 = (1.0f - cos2) / cos2;
-		float denom = M_PI * cos2 * cos2 * SQ(alpha2 + tan2);
-		if (denom <= 0.0f) return 0.0f;
-		return alpha2 / denom;
+		float alphaSq = alpha * alpha;
+		float cosThetaSq = h.z * h.z;
+		float tanThetaSq = (1.0f - cosThetaSq) / cosThetaSq;
+		float denominator = M_PI * cosThetaSq * cosThetaSq * SQ(alphaSq + tanThetaSq);
+		if (denominator <= 0.0f) return 0.0f;
+		return alphaSq / denominator;
 	}
 };
 
