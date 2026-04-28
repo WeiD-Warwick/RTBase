@@ -38,7 +38,7 @@ public:
 		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new GaussianFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
-		numProcs = 1;//sysInfo.dwNumberOfProcessors;
+		numProcs = sysInfo.dwNumberOfProcessors;
 		threads = new std::thread*[numProcs];
 		samplers = new MTRandom[numProcs];
 		for (int i = 0; i < numProcs; i++) samplers[i].generator.seed(i + 1);
@@ -49,7 +49,10 @@ public:
 		film->clear();
 	}
 	void setRenderMode(RenderMode mode) {
-		renderMode = mode;
+		if (renderMode != mode) {
+			renderMode = mode;
+			clear();
+		}
 	}
 	RenderMode getRenderMode() const {
 		return renderMode;
@@ -189,7 +192,7 @@ public:
 		return 0.0f;
 	}
 
-	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler, const ShadingData* prevShadingData, float prevBsdfPdf) {
+	Colour pathTrace(Ray& r, Colour pathThroughput, int depth, Sampler* sampler, ShadingData* prevShadingData, float prevBsdfPdf) {
 		int maxDepth = 8;
 
 		IntersectionData intersection = scene->traverse(r);
