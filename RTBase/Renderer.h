@@ -128,7 +128,7 @@ public:
 
 			// Calculate Geometry Term (Mento Carlo 65)
 			
-			float cosTheta = Dot(wi, shadingData.gNormal);
+			float cosTheta = Dot(wi, shadingData.sNormal);
 			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
@@ -164,7 +164,7 @@ public:
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
 			// Evaluate Geometry Term for environment maps 
-			float cosTheta = Dot(wi, shadingData.gNormal);
+			float cosTheta = Dot(wi, shadingData.sNormal);
 			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
@@ -272,7 +272,7 @@ public:
 			Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);
 			if (pdf <= 0) return Lo;
 
-			float cosTheta = Dot(wi, shadingData.gNormal);
+			float cosTheta = Dot(wi, shadingData.sNormal);
 			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Lo;
 			float absCosTheta = fabsf(cosTheta);
 
@@ -365,6 +365,15 @@ public:
 					int yStart = tileY * tileSize;
 					int xEnd = std::min((int)film->width, xStart + tileSize);
 					int yEnd = std::min((int)film->height, yStart + tileSize);
+					// avoid Gaussianfilter race
+					int filterRadius = film->filter->size();
+					int tileBufferXStart = std::max(0, xStart - filterRadius);
+					int tileBufferYStart = std::max(0, yStart - filterRadius);
+					int tileBufferXEnd = std::min((int)film->width, xEnd + filterRadius);
+					int tileBufferYEnd = std::min((int)film->height, yEnd + filterRadius);
+					unsigned int tileBufferWidth = tileBufferXEnd - tileBufferXStart;
+					unsigned int tileBufferHeight = tileBufferYEnd - tileBufferYStart;
+					std::vector<Colour> tileBuffer(tileBufferWidth * tileBufferHeight);
 
 					for (int y = yStart; y < yEnd; y++) {
 						for (int x = xStart; x < xEnd; x++) {
@@ -394,7 +403,13 @@ public:
 							}
 
 							col = clampSample(col);
-							film->splat(px, py, col);
+							film->splatToTile(px, py, col, tileBuffer.data(), tileBufferXStart, tileBufferYStart, tileBufferWidth, tileBufferHeight);
+						}
+					}
+
+					film->mergeTile(tileBuffer.data(), tileBufferXStart, tileBufferYStart, tileBufferWidth, tileBufferHeight);
+					for (int y = yStart; y < yEnd; y++) {
+						for (int x = xStart; x < xEnd; x++) {
 							unsigned char r, g, b;
 							film->tonemap(x, y, r, g, b);
 							canvas->draw(x, y, r, g, b);

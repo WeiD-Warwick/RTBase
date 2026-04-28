@@ -171,17 +171,18 @@ public:
 			shadingData.x = ray.at(intersection.t);
 			shadingData.gNormal = triangles[intersection.ID].gNormal();
 			triangles[intersection.ID].interpolateAttributes(intersection.alpha, intersection.beta, intersection.gamma, shadingData.sNormal, shadingData.tu, shadingData.tv);
+			if (Dot(shadingData.sNormal, shadingData.gNormal) < 0.0f)
+			{
+				shadingData.sNormal = -shadingData.sNormal;
+			}
 			shadingData.bsdf = materials[triangles[intersection.ID].materialIndex];
 			shadingData.wo = -ray.dir;
 			if (shadingData.bsdf->isTwoSided() && shadingData.bsdf->isLight() == false)
 			{
-				if (Dot(shadingData.wo, shadingData.sNormal) < 0)
-				{
-					shadingData.sNormal = -shadingData.sNormal;
-				}
 				if (Dot(shadingData.wo, shadingData.gNormal) < 0)
 				{
 					shadingData.gNormal = -shadingData.gNormal;
+					shadingData.sNormal = -shadingData.sNormal;
 				}
 			}
 			shadingData.frame.fromVector(shadingData.sNormal);

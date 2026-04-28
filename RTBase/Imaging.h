@@ -190,36 +190,103 @@ public:
 	int SPP;
 	ImageFilter* filter;
 	std::mutex filmMutex;
+	std::mutex* rowMutexes = NULL;
 
 	void splat(const float x, const float y, const Colour& L) {
-		std::lock_guard<std::mutex> lock(filmMutex);
-
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
 		float filterWeights[25];
 		unsigned int indices[25];
+		unsigned int rows[25];
 		unsigned int used = 0;
+		unsigned int rowCount = 0;
 		float total = 0;
 		int size = filter->size();
 		for (int i = -size; i <= size; i++) {
 			for (int j = -size; j <= size; j++) {
 				int px = (int)x + j;
 				int py = (int)y + i;
-				if (px >= 0 && px < width && py >= 0 && py < height) {
+				if (px >= 0 && (unsigned int)px < width && py >= 0 && (unsigned int)py < height) {
 					indices[used] = (py * width) + px;
 					filterWeights[used] = filter->filter(px - x, py - y);
 					total += filterWeights[used];
+					bool rowFound = false;
+					for (unsigned int r = 0; r < rowCount; r++) {
+						if (rows[r] == (unsigned int)py) {
+							rowFound = true;
+							break;
+						}
+					}
+					if (!rowFound) {
+						rows[rowCount] = (unsigned int)py;
+						rowCount++;
+					}
 					used++;
 				}
 			}
 		}
-		for (int i = 0; i < used; i++) {
+		if (total <= 0.0f) return;
+
+		std::sort(rows, rows + rowCount);
+		std::unique_lock<std::mutex> rowLocks[25];
+		for (unsigned int i = 0; i < rowCount; i++) {
+			rowLocks[i] = std::unique_lock<std::mutex>(rowMutexes[rows[i]]);
+		}
+
+		for (unsigned int i = 0; i < used; i++) {
 			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
+		}
+	}
+	void splatToTile(const float x, const float y, const Colour& L, Colour* tile, const int tileXStart, const int tileYStart, const unsigned int tileWidth, const unsigned int tileHeight) {
+		float total = 0;
+		int size = filter->size();
+		for (int i = -size; i <= size; i++) {
+			for (int j = -size; j <= size; j++) {
+				int px = (int)x + j;
+				int py = (int)y + i;
+				int tx = px - tileXStart;
+				int ty = py - tileYStart;
+				if (px >= 0 && (unsigned int)px < width && py >= 0 && (unsigned int)py < height &&
+					tx >= 0 && (unsigned int)tx < tileWidth && ty >= 0 && (unsigned int)ty < tileHeight) {
+					total += filter->filter(px - x, py - y);
+				}
+			}
+		}
+		if (total <= 0.0f) return;
+
+		for (int i = -size; i <= size; i++) {
+			for (int j = -size; j <= size; j++) {
+				int px = (int)x + j;
+				int py = (int)y + i;
+				int tx = px - tileXStart;
+				int ty = py - tileYStart;
+				if (px >= 0 && (unsigned int)px < width && py >= 0 && (unsigned int)py < height &&
+					tx >= 0 && (unsigned int)tx < tileWidth && ty >= 0 && (unsigned int)ty < tileHeight) {
+					unsigned int index = ((unsigned int)ty * tileWidth) + (unsigned int)tx;
+					tile[index] = tile[index] + (L * filter->filter(px - x, py - y) / total);
+				}
+			}
+		}
+	}
+	void mergeTile(const Colour* tile, const int tileXStart, const int tileYStart, const unsigned int tileWidth, const unsigned int tileHeight) {
+		for (unsigned int ty = 0; ty < tileHeight; ty++) {
+			int y = tileYStart + (int)ty;
+			if (y < 0 || (unsigned int)y >= height) continue;
+
+			std::lock_guard<std::mutex> lock(rowMutexes[y]);
+			for (unsigned int tx = 0; tx < tileWidth; tx++) {
+				int x = tileXStart + (int)tx;
+				if (x < 0 || (unsigned int)x >= width) continue;
+
+				unsigned int filmIndex = ((unsigned int)y * width) + (unsigned int)x;
+				unsigned int tileIndex = (ty * tileWidth) + tx;
+				film[filmIndex] = film[filmIndex] + tile[tileIndex];
+			}
 		}
 	}
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
 		// Return a tonemapped pixel at coordinates x, y
-		std::lock_guard<std::mutex> lock(filmMutex);
+		std::lock_guard<std::mutex> lock(rowMutexes[y]);
 
 		Colour colour = film[y * width + x] / SPP;
 		colour = colour * exposure;
@@ -243,12 +310,18 @@ public:
 		width = _width;
 		height = _height;
 		film = new Colour[width * height];
+		rowMutexes = new std::mutex[height];
 		clear();
 		filter = _filter;
 	}
 	void clear()
 	{
 		std::lock_guard<std::mutex> lock(filmMutex);
+		std::vector<std::unique_lock<std::mutex>> rowLocks;
+		rowLocks.reserve(height);
+		for (unsigned int y = 0; y < height; y++) {
+			rowLocks.push_back(std::unique_lock<std::mutex>(rowMutexes[y]));
+		}
 		memset(film, 0, width * height * sizeof(Colour));
 		SPP = 0;
 	}
@@ -260,6 +333,11 @@ public:
 	void save(std::string filename)
 	{
 		std::lock_guard<std::mutex> lock(filmMutex);
+		std::vector<std::unique_lock<std::mutex>> rowLocks;
+		rowLocks.reserve(height);
+		for (unsigned int y = 0; y < height; y++) {
+			rowLocks.push_back(std::unique_lock<std::mutex>(rowMutexes[y]));
+		}
 		Colour* hdrpixels = new Colour[width * height];
 		for (unsigned int i = 0; i < (width * height); i++)
 		{
