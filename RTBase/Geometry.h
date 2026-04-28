@@ -146,20 +146,30 @@ public:
 	// Add code here
 	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const
 	{
-		float denom = Dot(n, r.dir);
-		if (fabs(denom) < EPSILON) {
+		const Vec3 E1 = vertices[1].p - vertices[0].p;
+		const Vec3 E2 = vertices[2].p - vertices[0].p;
+		const Vec3 S = r.o - vertices[0].p;
+		const Vec3 S1 = Cross(r.dir, E2);
+		const Vec3 S2 = Cross(S, E1);
+
+		const float det = Dot(E1, S1);
+		const float detEpsilon = 1.0e-8f;
+		if (fabs(det) < detEpsilon) {
 			return false;
 		}
 
-		t = (d - Dot(n, r.o)) / denom;
-		if (t < 0) { return false; }
+		const float invDet = 1.0f / det;
+		const float beta = Dot(S, S1) * invDet;
+		if (beta < 0.0f || beta > 1.0f) { return false; }
 
-		Vec3 p = r.at(t);
-		float invArea = 1.0f / Dot(e1.cross(e2), n);
-		u = Dot(e1.cross(p - vertices[1].p), n) * invArea;
-		if (u < 0 || u > 1.0f) { return false; }
-		v = Dot(e2.cross(p - vertices[2].p), n) * invArea;
-		if (v < 0 || (u + v) > 1.0f) { return false; }
+		const float gamma = Dot(r.dir, S2) * invDet;
+		if (gamma < 0.0f || (beta + gamma) > 1.0f) { return false; }
+
+		t = Dot(E2, S2) * invDet;
+		if (t < 0.0f) { return false; }
+
+		u = 1.0f - beta - gamma;
+		v = beta;
 
 		return true;
 	}
