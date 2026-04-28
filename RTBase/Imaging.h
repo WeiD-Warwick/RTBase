@@ -6,6 +6,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define __STDC_LIB_EXT1__
 #include "stb_image_write.h"
+#include <mutex>
 
 // Stop warnings about buffer overruns if size is zero. Size should never be zero and if it is the code handles it.
 #pragma warning( disable : 6386)
@@ -188,8 +189,11 @@ public:
 	unsigned int height;
 	int SPP;
 	ImageFilter* filter;
-	void splat(const float x, const float y, const Colour& L)
-	{
+	std::mutex filmMutex;
+
+	void splat(const float x, const float y, const Colour& L) {
+		std::lock_guard<std::mutex> lock(filmMutex);
+
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
 		float filterWeights[25];
 		unsigned int indices[25];
@@ -215,23 +219,23 @@ public:
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
 		// Return a tonemapped pixel at coordinates x, y
-		Colour c = film[y * width + x] / SPP;
+		std::lock_guard<std::mutex> lock(filmMutex);
 
-		c = c * exposure;
+		Colour colour = film[y * width + x] / SPP;
+		colour = colour * exposure;
 
 		// Reinhard Global
+		colour.r = colour.r / (1.0f + colour.r);
+		colour.g = colour.g / (1.0f + colour.g);
+		colour.b = colour.b / (1.0f + colour.b);
 
-		c.r = c.r / (1.0f + c.r);
-		c.g = c.g / (1.0f + c.g);
-		c.b = c.b / (1.0f + c.b);
+		colour.r = powf(colour.r, 1.0f / 2.2f);
+		colour.g = powf(colour.g, 1.0f / 2.2f);
+		colour.b = powf(colour.b, 1.0f / 2.2f);
 
-		c.r = powf(c.r, 1.0f / 2.2f);
-		c.g = powf(c.g, 1.0f / 2.2f);
-		c.b = powf(c.b, 1.0f / 2.2f);
-
-		r = (unsigned char)(c.r * 255.0f);
-		g = (unsigned char)(c.g * 255.0f);
-		b = (unsigned char)(c.b * 255.0f);
+		r = (unsigned char)(colour.r * 255.0f);
+		g = (unsigned char)(colour.g * 255.0f);
+		b = (unsigned char)(colour.b * 255.0f);
 	}
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
@@ -244,15 +248,18 @@ public:
 	}
 	void clear()
 	{
+		std::lock_guard<std::mutex> lock(filmMutex);
 		memset(film, 0, width * height * sizeof(Colour));
 		SPP = 0;
 	}
 	void incrementSPP()
 	{
+		std::lock_guard<std::mutex> lock(filmMutex);
 		SPP++;
 	}
 	void save(std::string filename)
 	{
+		std::lock_guard<std::mutex> lock(filmMutex);
 		Colour* hdrpixels = new Colour[width * height];
 		for (unsigned int i = 0; i < (width * height); i++)
 		{

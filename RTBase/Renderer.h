@@ -11,6 +11,7 @@
 #include <thread>
 #include <functional>
 #include <atomic>
+#include <cmath>
 
 class RayTracer
 {
@@ -29,6 +30,7 @@ public:
 	std::thread **threads;
 	int numProcs;
 	RenderMode renderMode = RenderMode::PathTrace;
+	float fireflyClamp = 10.0f;
 
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
@@ -72,6 +74,26 @@ public:
 		return a2 / sum;
 	}
 
+	Colour clampSample(Colour colour) {
+		if (!std::isfinite(colour.r) || !std::isfinite(colour.g) || !std::isfinite(colour.b)) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		colour.r = std::max(colour.r, 0.0f);
+		colour.g = std::max(colour.g, 0.0f);
+		colour.b = std::max(colour.b, 0.0f);
+
+		float lum = colour.Lum();
+		if (!std::isfinite(lum) || lum <= 0.0f || fireflyClamp <= 0.0f) {
+			return colour;
+		}
+
+		if (lum > fireflyClamp) {
+			colour = colour * (fireflyClamp / lum);
+		}
+		return colour;
+	}
+
 	Vec3 offsetRayOrigin(const Vec3& x, const Vec3& gNormal, const Vec3& w) {
 		float side = Dot(w, gNormal) >= 0.0f ? 1.0f : -1.0f;
 		return x + gNormal * (EPSILON * side);
@@ -110,7 +132,7 @@ public:
 			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
-			Vec3 lightNormal = light->normal(shadingData, -wi);
+			Vec3 lightNormal = light->normal(shadingData, wi);
 			float cosThetaPrime = Dot(-wi, lightNormal);
 			if (cosThetaPrime <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
@@ -137,7 +159,7 @@ public:
 			Vec3 wi = shadowRayDir.normalize();
 
 			// Evaluate visibility to outside scene bounds
-			Ray shadowRay(offsetRayOrigin(shadingData.x, shadingData.sNormal, wi), wi);
+			Ray shadowRay(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
 			IntersectionData shadowHit = scene->traverse(shadowRay);
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
@@ -158,11 +180,19 @@ public:
 
 	float lightPdfFromPrevPoint(const ShadingData& prevShadingData, const ShadingData& shadingData, const Vec3& wi, int hitTriangleID) {
 
-		float lightPmf = scene->lightSelectionPMF();
-		if (lightPmf <= 0.0f) return 0.0f;
-
 		if (hitTriangleID >= 0 && hitTriangleID < scene->triangles.size()) {
+			float lightPmf = 0.0f;
 			Triangle* hitTriangle = &scene->triangles[hitTriangleID];
+			for (int i = 0; i < scene->lights.size(); i++) {
+				if (!scene->lights[i]->isArea()) continue;
+				AreaLight* area = dynamic_cast<AreaLight*>(scene->lights[i]);
+				if (area != NULL && area->triangle == hitTriangle) {
+					lightPmf = scene->lightSelectionPMF();
+					break;
+				}
+			}
+			if (lightPmf <= 0.0f) return 0.0f;
+
 			if (hitTriangle->area <= 0.0f) return 0.0f;
 
 			float pdfArea = 1.0f / hitTriangle->area;
@@ -170,16 +200,19 @@ public:
 			float dist2 = (shadingData.x - prevShadingData.x).lengthSq();
 			float cosThetaPrime = std::max(Dot(-wi, lightNormal), 0.0f);
 			if (cosThetaPrime <= 0.0f) return 0.0f;
+
 			float pdfW = pdfArea * dist2 / cosThetaPrime;
 			return pdfW * lightPmf;
 		}
 
 		// Background / environment light
 		if (scene->background != NULL) {
+			float lightPmf = 0.0f;
 			bool backgroundIsSampledLight = false;
 			for (int i = 0; i < scene->lights.size(); i++) {
 				if (scene->lights[i] == scene->background) {
 					backgroundIsSampledLight = true;
+					lightPmf = scene->lightSelectionPMF();
 					break;
 				}
 			}
@@ -226,11 +259,12 @@ public:
 			return pathThroughput * Le * weight;
 		}
 		else {
-			if (depth >= maxDepth) {
-				return Colour(0.0f, 0.0f, 0.0f);
-			}
 			// Direct Light (NEE)
 			Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
+
+			if (depth >= maxDepth) {
+				return Lo;
+			}
 
 			// Indirect Light (traverse)
 			float pdf = 0.0f;
@@ -359,6 +393,7 @@ public:
 								break;
 							}
 
+							col = clampSample(col);
 							film->splat(px, py, col);
 							unsigned char r, g, b;
 							film->tonemap(x, y, r, g, b);

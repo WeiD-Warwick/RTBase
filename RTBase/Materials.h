@@ -517,8 +517,8 @@ public:
 		float cosThetaI = wiLocal.z;
 		float cosThetaO = woLocal.z;
 
-		float sinThetaI = sqrtf(1.0f - cosThetaI * cosThetaI);
-		float sinThetaO = sqrtf(1.0f - cosThetaO * cosThetaO);
+		float sinThetaI = sqrtf(std::max(0.0f, 1.0f - cosThetaI * cosThetaI));
+		float sinThetaO = sqrtf(std::max(0.0f, 1.0f - cosThetaO * cosThetaO));
 
 		float sinAlpha, tanBeta;
 
@@ -532,8 +532,12 @@ public:
 			tanBeta = sinThetaO / cosThetaO;
 		}
 
-		float cosPhiDiff = (wiLocal.x * woLocal.x + wiLocal.y * woLocal.y) / (sinThetaI * sinThetaO);
-		cosPhiDiff = std::max(-1.0f, std::min(1.0f, cosPhiDiff));
+		float sinThetaProduct = sinThetaI * sinThetaO;
+		float cosPhiDiff = 0.0f;
+		if (sinThetaProduct > EPSILON) {
+			cosPhiDiff = (wiLocal.x * woLocal.x + wiLocal.y * woLocal.y) / sinThetaProduct;
+			cosPhiDiff = std::max(-1.0f, std::min(1.0f, cosPhiDiff));
+		}
 
 		float orenNayar = A + B * std::max(0.0f, cosPhiDiff) * sinAlpha * tanBeta;
 
