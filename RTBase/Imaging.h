@@ -128,42 +128,55 @@ public:
 	}
 };
 
-class ImageFilter {
+class ImageFilter
+{
 public:
 	virtual float filter(const float x, const float y) const = 0;
 	virtual int size() const = 0;
 };
 
-class BoxFilter : public ImageFilter {
+class BoxFilter : public ImageFilter
+{
 public:
-
-	float filter(float x, float y) const {
-		if (fabsf(x) <= 0.5f && fabsf(y) <= 0.5f)
+	float filter(float x, float y) const
+	{
+		if (fabsf(x) < 0.5f && fabs(y) < 0.5f)
 		{
 			return 1.0f;
 		}
 		return 0;
 	}
-
-	int size() const {
+	int size() const
+	{
 		return 1;
 	}
 };
 
-class TentFilter : public ImageFilter {
+class GaussianFilter : public ImageFilter
+{
 public:
 	float radius;
+	float alpha;
 
-	TentFilter(float r = 1.0f) : radius(r) {}
-
-	float filter(const float x, const float y) const override {
-		float wx = std::max(0.0f, radius - fabsf(x));
-		float wy = std::max(0.0f, radius - fabsf(y));
-		return wx * wy;
+	GaussianFilter(float r = 2.0f, float a = 2.0f)
+		: radius(r), alpha(a) {
 	}
 
-	int size() const override {
-		return ceilf(radius);
+	float gaussian(float d) const {
+		if (fabsf(d) >= radius) {
+			return 0.0f;
+		}
+		float value = expf(-alpha * d * d) - expf(-alpha * radius * radius);
+		return std::max(0.0f, value);
+	}
+
+	float filter(const float x, const float y) const {
+		return gaussian(x) * gaussian(y);
+	}
+
+	int size() const
+	{
+		return ceil(radius);
 	}
 };
 
@@ -175,17 +188,18 @@ public:
 	unsigned int height;
 	int SPP;
 	ImageFilter* filter;
-
-	void splat(const float x, const float y, const Colour& L) {
-		float filterWeights[25]; // Storage to cache weights
-		unsigned int indices[25]; // Store indices to minimize computations
+	void splat(const float x, const float y, const Colour& L)
+	{
+		// Code to splat a smaple with colour L into the image plane using an ImageFilter
+		float filterWeights[25];
+		unsigned int indices[25];
 		unsigned int used = 0;
 		float total = 0;
 		int size = filter->size();
 		for (int i = -size; i <= size; i++) {
 			for (int j = -size; j <= size; j++) {
-				unsigned int px = (int)x + j;
-				unsigned int py = (int)y + i;
+				int px = (int)x + j;
+				int py = (int)y + i;
 				if (px >= 0 && px < width && py >= 0 && py < height) {
 					indices[used] = (py * width) + px;
 					filterWeights[used] = filter->filter(px - x, py - y);
@@ -194,12 +208,13 @@ public:
 				}
 			}
 		}
-		for (unsigned int i = 0; i < used; i++) {
+		for (int i = 0; i < used; i++) {
 			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
 		}
 	}
-
-	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f) {
+	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
+	{
+		// Return a tonemapped pixel at coordinates x, y
 		Colour c = film[y * width + x] / SPP;
 
 		c = c * exposure;
@@ -218,7 +233,6 @@ public:
 		g = (unsigned char)(c.g * 255.0f);
 		b = (unsigned char)(c.b * 255.0f);
 	}
-
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
 	{

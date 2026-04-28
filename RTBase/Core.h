@@ -544,15 +544,16 @@ public:
 class SphericalCoordinates
 {
 public:
-	static Vec3 sphericalToWorld(float theta, float phi) {
+	static Vec3 sphericalToWorld(float theta, float phi)
+	{
 		return Vec3(cosf(phi) * sinf(theta), sinf(phi) * sinf(theta), cosf(theta));
 	}
-
-	static float sphericalTheta(const Vec3& wi) {
+	static float sphericalTheta(const Vec3& wi)
+	{
 		return acosf(wi.z);
 	}
-
-	static float sphericalPhi(const Vec3& wi) {
+	static float sphericalPhi(const Vec3& wi)
+	{
 		float p = atan2f(wi.y, wi.x);
 		return (p < 0.0f) ? p + (2.0f * M_PI) : p;
 	}

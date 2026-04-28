@@ -39,7 +39,6 @@ public:
 		viewDirection = camera.mulVec(viewDirection);
 		viewDirection = viewDirection.normalize();
 	}
-
 	// Add code here
 	Ray generateRay(float x, float y)
 	{
@@ -49,10 +48,9 @@ public:
 		h = h * 2.f - 1.f;
 		Vec3 dir = inverseProjectionMatrix.mulPointAndPerspectiveDivide(Vec3(w, h, 0));
 		dir = camera.mulVec(dir);
-		dir.normalize();
+		dir = dir.normalize();
 		return Ray(origin, dir);
 	}
-
 	bool projectOntoCamera(const Vec3& p, float& x, float& y)
 	{
 		Vec3 pview = cameraToView.mulPoint(p);
@@ -80,8 +78,8 @@ public:
 	BVHNode* bvh = NULL;
 	Camera camera;
 	AABB bounds;
-
-	void build() {
+	void build()
+	{
 		// Add BVH building code here
 		bounds.reset();
 		for (int i = 0; i < triangles.size(); i++) {
@@ -108,27 +106,27 @@ public:
 			}
 		}
 	}
-	IntersectionData traverse(const Ray& ray) {
-
+	IntersectionData traverse(const Ray& ray)
+	{
 		return bvh->traverse(ray, triangles);
 	}
-
-	Light* sampleLight(Sampler* sampler, float& pmf) {
+	Light* sampleLight(Sampler* sampler, float& pmf)
+	{
 
 		if (lights.empty()) {
 			pmf = 0.0f;
 			return NULL;
 		}
-
-		float r = sampler->next();
-		int lightIndex = lights.size() * r;
-
-		pmf = lightPMF();
-
+		float r1 = sampler->next();
+		int lightIndex = lights.size() * r1;
+		pmf = lightSelectionPMF();
 		return lights[lightIndex];
 	}
 
-	float lightPMF() {
+	float lightSelectionPMF() {
+		if (lights.empty()) {
+			return 0.0f;
+		}
 		return 1.0f / lights.size();
 	}
 
@@ -152,17 +150,15 @@ public:
 			lights.push_back(background);
 		}
 	}
-
-	bool visible(const Vec3& p1, const Vec3& p2) {
+	bool visible(const Vec3& p1, const Vec3& p2)
+	{
 		Ray ray;
 		Vec3 dir = p2 - p1;
-		float maxT = dir.length();
+		float maxT = dir.length() - (2.0f * EPSILON);
 		dir = dir.normalize();
-		ray.init(p1, dir);
-
+		ray.init(p1 + (dir * EPSILON), dir);
 		return bvh->traverseVisible(ray, triangles, maxT);
 	}
-
 	Colour emit(Triangle* light, ShadingData shadingData, Vec3 wi)
 	{
 		return materials[light->materialIndex]->emit(shadingData, wi);
@@ -174,11 +170,10 @@ public:
 		{
 			shadingData.x = ray.at(intersection.t);
 			shadingData.gNormal = triangles[intersection.ID].gNormal();
-			shadingData.x = shadingData.x + shadingData.gNormal * EPSILON;
 			triangles[intersection.ID].interpolateAttributes(intersection.alpha, intersection.beta, intersection.gamma, shadingData.sNormal, shadingData.tu, shadingData.tv);
 			shadingData.bsdf = materials[triangles[intersection.ID].materialIndex];
 			shadingData.wo = -ray.dir;
-			if (shadingData.bsdf->isTwoSided())
+			if (shadingData.bsdf->isTwoSided() && shadingData.bsdf->isLight() == false)
 			{
 				if (Dot(shadingData.wo, shadingData.sNormal) < 0)
 				{

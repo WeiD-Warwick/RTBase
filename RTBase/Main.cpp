@@ -7,12 +7,6 @@
 #include "GamesEngineeringBase.h"
 #include <unordered_map>
 
-// TODO
-// Environment CDF
-// BVH
-// PathTracing
-// Sphere interaction
-
 void runTests()
 {
 	// Plane test
@@ -52,17 +46,15 @@ void runTests()
 int main(int argc, char *argv[])
 {
 	// Add call to tests if required
-	//runTests();
-	
+	// runTests();
+
 	// Initialize default parameters
 	//std::string sceneName = "cornell-box";
-	//std::string sceneName = "bathroom";
-	//std::string sceneName = "bathroom2";
-	//std::string sceneName = "glass-of-water";
 	std::string sceneName = "MaterialsScene";
+	//std::string sceneName = "bathroom";
+	//std::string sceneName = "car2";
 	std::string filename = "GI.hdr";
 	unsigned int SPP = 8192;
-	//unsigned int SPP = 50000;
 
 	if (argc > 1)
 	{
@@ -147,6 +139,26 @@ int main(int argc, char *argv[])
 		{
 			viewcamera.flyDown();
 			rt.clear();
+		}
+		if (canvas.keyPressed('1')) {
+			rt.setRenderMode(RayTracer::RenderMode::PathTrace);
+			rt.clear();
+			std::cout << "Render mode: PathTrace" << std::endl;
+		}
+		if (canvas.keyPressed('2')) {
+			rt.setRenderMode(RayTracer::RenderMode::DebugSNormal);
+			rt.clear();
+			std::cout << "Render mode: DebugSNormal" << std::endl;
+		}
+		if (canvas.keyPressed('3')) {
+			rt.setRenderMode(RayTracer::RenderMode::DebugGNormal);
+			rt.clear();
+			std::cout << "Render mode: DebugGNormal" << std::endl;
+		}
+		if (canvas.keyPressed('4')) {
+			rt.setRenderMode(RayTracer::RenderMode::DebugNormalDelta);
+			rt.clear();
+			std::cout << "Render mode: DebugNormalDelta" << std::endl;
 		}
 		// Time how long a render call takes
 		timer.reset();
