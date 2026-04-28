@@ -129,8 +129,8 @@ public:
 			// Calculate Geometry Term (Mento Carlo 65)
 			
 			float cosTheta = Dot(wi, shadingData.sNormal);
-			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
+			if (absCosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
 			Vec3 lightNormal = light->normal(shadingData, wi);
 			float cosThetaPrime = Dot(-wi, lightNormal);
@@ -165,8 +165,8 @@ public:
 
 			// Evaluate Geometry Term for environment maps 
 			float cosTheta = Dot(wi, shadingData.sNormal);
-			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
+			if (absCosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 
 			// Evaluate BSDF and multiply terms and return 
 			Colour reflectedColour = shadingData.bsdf->evaluate(shadingData, wi);
@@ -273,8 +273,8 @@ public:
 			if (pdf <= 0) return Lo;
 
 			float cosTheta = Dot(wi, shadingData.sNormal);
-			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Lo;
 			float absCosTheta = fabsf(cosTheta);
+			if (absCosTheta <= 0.0f) return Lo;
 
 			Colour nextPaththroughput = pathThroughput * reflectedColour * absCosTheta / pdf;
 			if (nextPaththroughput.Lum() <= 0.0f) return Lo;

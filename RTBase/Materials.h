@@ -35,13 +35,14 @@ class ShadingHelper
 {
 public:
 	static float fresnelDielectric(float cosTheta, float iorInt, float iorExt) {
+		cosTheta = std::min(std::max(cosTheta, -1.0f), 1.0f);
 		float etaI = iorExt, etaT = iorInt;
 		float c = cosTheta;
 		if (c < 0.0f) { std::swap(etaI, etaT); c = -c; }
 		float eta = etaI / etaT;
-		float sin2T = eta * eta * (1.0f - c * c);
-		if (sin2T > 1.0f) return 1.0f;
-		float cosT = sqrtf(1.0f - sin2T);
+		float sin2T = eta * eta * std::max(0.0f, 1.0f - c * c);
+		if (sin2T >= 1.0f) return 1.0f;
+		float cosT = sqrtf(std::max(0.0f, 1.0f - sin2T));
 		float rs = (etaI * c - etaT * cosT) / (etaI * c + etaT * cosT);
 		float rp = (etaT * c - etaI * cosT) / (etaT * c + etaI * cosT);
 		return 0.5f * (rs * rs + rp * rp);
@@ -361,7 +362,7 @@ public:
 	}
 	bool isTwoSided()
 	{
-		return true;
+		return false;
 	}
 	float mask(const ShadingData& shadingData)
 	{
