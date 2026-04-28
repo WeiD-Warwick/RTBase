@@ -69,6 +69,11 @@ public:
 		return a2 / sum;
 	}
 
+	Vec3 offsetRayOrigin(const Vec3& x, const Vec3& gNormal, const Vec3& w) {
+		float side = Dot(w, gNormal) >= 0.0f ? 1.0f : -1.0f;
+		return x + gNormal * (EPSILON * side);
+	}
+
 	// NEE (pdf base Light Area)
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler) {
 		// Is surface is specular we cannot computing direct lighting
@@ -98,7 +103,7 @@ public:
 
 			// Calculate Geometry Term (Mento Carlo 65)
 			
-			float cosTheta = Dot(wi, shadingData.sNormal);
+			float cosTheta = Dot(wi, shadingData.gNormal);
 			if (cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
@@ -129,12 +134,12 @@ public:
 			Vec3 wi = shadowRayDir.normalize();
 
 			// Evaluate visibility to outside scene bounds
-			Ray shadowRay(shadingData.x, wi);
+			Ray shadowRay(offsetRayOrigin(shadingData.x, shadingData.sNormal, wi), wi);
 			IntersectionData shadowHit = scene->traverse(shadowRay);
 			if (shadowHit.t < FLT_MAX) return Colour(0.0f, 0.0f, 0.0f);
 
 			// Evaluate Geometry Term for environment maps 
-			float cosTheta = Dot(wi, shadingData.sNormal);
+			float cosTheta = Dot(wi, shadingData.gNormal);
 			if (!shadingData.bsdf->isTwoSided() && cosTheta <= 0.0f) return Colour(0.0f, 0.0f, 0.0f);
 			float absCosTheta = fabsf(cosTheta);
 
@@ -229,7 +234,7 @@ public:
 				nextPaththroughput = nextPaththroughput / continueProbability;
 			}
 
-			Ray nextRay(shadingData.x + wi * EPSILON, wi);
+			Ray nextRay(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
 			return Lo + pathTrace(nextRay, nextPaththroughput, depth + 1, sampler, &shadingData, pdf);
 		}
 	}
