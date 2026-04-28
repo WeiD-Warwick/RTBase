@@ -38,7 +38,7 @@ public:
 		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new GaussianFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
-		numProcs = sysInfo.dwNumberOfProcessors;
+		numProcs = 1;//sysInfo.dwNumberOfProcessors;
 		threads = new std::thread*[numProcs];
 		samplers = new MTRandom[numProcs];
 		for (int i = 0; i < numProcs; i++) samplers[i].generator.seed(i + 1);
@@ -170,14 +170,27 @@ public:
 			float pdfW = pdfArea * dist2 / cosThetaPrime;
 			return pdfW * lightPmf;
 		}
+
+		// Background / environment light
+		if (scene->background != NULL) {
+			bool backgroundIsSampledLight = false;
+			for (int i = 0; i < scene->lights.size(); i++) {
+				if (scene->lights[i] == scene->background) {
+					backgroundIsSampledLight = true;
+					break;
+				}
+			}
+			if (!backgroundIsSampledLight) return 0.0f;
+
+			float bgPdf = scene->background->PDF(prevShadingData, wi);
+			if (bgPdf <= 0.0f) return 0.0f;
+			return bgPdf * lightPmf;
+		}
 		return 0.0f;
 	}
 
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler, const ShadingData* prevShadingData, float prevBsdfPdf) {
 		int maxDepth = 8;
-		if (depth >= maxDepth) {
-			return Colour(0.0f, 0.0f, 0.0f);
-		}
 
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
@@ -210,6 +223,9 @@ public:
 			return pathThroughput * Le * weight;
 		}
 		else {
+			if (depth >= maxDepth) {
+				return Colour(0.0f, 0.0f, 0.0f);
+			}
 			// Direct Light (NEE)
 			Colour Lo = pathThroughput * computeDirect(shadingData, sampler);
 
