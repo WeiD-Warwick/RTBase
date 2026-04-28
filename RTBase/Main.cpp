@@ -177,7 +177,7 @@ int main(int argc, char *argv[])
 		if (canvas.keyPressed('L'))
 		{
 			size_t pos = filename.find_last_of('.');
-			std::string ldrFilename = filename.substr(0, pos) + ".png";
+			std::string ldrFilename = filename.substr(0, pos) + "-" + std::to_string(rt.getSPP()) + ".png";
 			rt.savePNG(ldrFilename);
 		}
 		if (SPP == rt.getSPP())

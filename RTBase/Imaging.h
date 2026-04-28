@@ -2,10 +2,10 @@
 
 #include "Core.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "external/stb_image/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define __STDC_LIB_EXT1__
-#include "stb_image_write.h"
+#include "external/stb_image/stb_image_write.h"
 #include <mutex>
 
 // Stop warnings about buffer overruns if size is zero. Size should never be zero and if it is the code handles it.
