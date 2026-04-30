@@ -12,6 +12,7 @@
 #include <functional>
 #include <atomic>
 #include <cmath>
+#include <OpenImageDenoise/oidn.hpp>
 
 class RayTracer
 {
@@ -31,24 +32,30 @@ public:
 	int numProcs;
 	RenderMode renderMode = RenderMode::PathTrace;
 	float fireflyClamp = 10.0f;
+	std::vector<Colour> albedoBuffer;
+	std::vector<Colour> normalBuffer;
 
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
 		canvas = _canvas;
 		film = new Film();
-		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new GaussianFilter());
+		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new BoxFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 		numProcs = sysInfo.dwNumberOfProcessors;
 		threads = new std::thread*[numProcs];
 		samplers = new MTRandom[numProcs];
 		for (int i = 0; i < numProcs; i++) samplers[i].generator.seed(i + 1);
+		albedoBuffer.resize(film->width * film->height);
+		normalBuffer.resize(film->width * film->height);
 		clear();
 	}
 	void clear()
 	{
 		film->clear();
+		std::fill(albedoBuffer.begin(), albedoBuffer.end(), Colour(0.0f, 0.0f, 0.0f));
+		std::fill(normalBuffer.begin(), normalBuffer.end(), Colour(0.0f, 0.0f, 0.0f));
 	}
 	void setRenderMode(RenderMode mode) {
 		if (renderMode != mode) {
@@ -305,18 +312,43 @@ public:
 		return scene->background->evaluate(r.dir);
 	}
 
+	Colour materialAlbedo(BSDF* bsdf, const ShadingData& shadingData) {
+		if (DiffuseBSDF* material = dynamic_cast<DiffuseBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (OrenNayarBSDF* material = dynamic_cast<OrenNayarBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (PlasticBSDF* material = dynamic_cast<PlasticBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (MirrorBSDF* material = dynamic_cast<MirrorBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (ConductorBSDF* material = dynamic_cast<ConductorBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (GlassBSDF* material = dynamic_cast<GlassBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (DielectricBSDF* material = dynamic_cast<DielectricBSDF*>(bsdf)) {
+			return material->albedo->sample(shadingData.tu, shadingData.tv);
+		}
+		if (LayeredBSDF* material = dynamic_cast<LayeredBSDF*>(bsdf)) {
+			return materialAlbedo(material->base, shadingData);
+		}
+		return Colour(1.0f, 1.0f, 1.0f);
+	}
+
 	Colour albedo(Ray& r) {
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 		if (shadingData.t < FLT_MAX)
 		{
-			if (shadingData.bsdf->isLight())
-			{
-				return shadingData.bsdf->emit(shadingData, shadingData.wo);
-			}
-			return shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
+			if (shadingData.bsdf->isLight()) return Colour(0.0f, 0.0f, 0.0f);
+			return materialAlbedo(shadingData.bsdf, shadingData);
 		}
-		return scene->background->evaluate(r.dir);
+		return Colour(0.0f, 0.0f, 0.0f);
 	}
 
 	Colour viewNormals(Ray& r) {
@@ -324,6 +356,15 @@ public:
 		if (intersection.t < FLT_MAX) {
 			ShadingData shadingData = scene->calculateShadingData(intersection, r);
 			return Colour(fabsf(shadingData.sNormal.x), fabsf(shadingData.sNormal.y), fabsf(shadingData.sNormal.z));
+		}
+		return Colour(0.0f, 0.0f, 0.0f);
+	}
+
+	Colour normalAOV(Ray& r) {
+		IntersectionData intersection = scene->traverse(r);
+		if (intersection.t < FLT_MAX) {
+			ShadingData shadingData = scene->calculateShadingData(intersection, r);
+			return Colour(shadingData.sNormal.x, shadingData.sNormal.y, shadingData.sNormal.z);
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
@@ -382,25 +423,11 @@ public:
 
 							Ray ray = scene->camera.generateRay(px, py);
 							Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
-							Colour col;
+							Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
 
-							switch (renderMode) {
-							case RayTracer::RenderMode::PathTrace:
-								col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
-								break;
-							case RayTracer::RenderMode::DebugSNormal:
-								col = viewNormals(ray);
-								break;
-							case RayTracer::RenderMode::DebugGNormal:
-								col = viewGNormals(ray);
-								break;
-							case RayTracer::RenderMode::DebugNormalDelta:
-								col = viewNormalDelta(ray);
-								break;
-							default:
-								col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
-								break;
-							}
+							int pixelIndex = y * film->width + x;
+							albedoBuffer[pixelIndex] = albedoBuffer[pixelIndex] + albedo(ray);
+							normalBuffer[pixelIndex] = normalBuffer[pixelIndex] + normalAOV(ray);
 
 							col = clampSample(col);
 							film->splatToTile(px, py, col, tileBuffer.data(), tileBufferXStart, tileBufferYStart, tileBufferWidth, tileBufferHeight);
@@ -435,5 +462,147 @@ public:
 	void savePNG(std::string filename)
 	{
 		stbi_write_png(filename.c_str(), canvas->getWidth(), canvas->getHeight(), 3, canvas->getBackBuffer(), canvas->getWidth() * 3);
+	}
+	Colour averagePixel(Colour& colour) {
+		return colour / film->SPP;
+	}
+	Colour tonemapColour(Colour colour, float exposure = 1.0f) const {
+		colour = colour * exposure;
+		colour.r = colour.r / (1.0f + colour.r);
+		colour.g = colour.g / (1.0f + colour.g);
+		colour.b = colour.b / (1.0f + colour.b);
+		colour.r = powf(std::max(colour.r, 0.0f), 1.0f / 2.2f);
+		colour.g = powf(std::max(colour.g, 0.0f), 1.0f / 2.2f);
+		colour.b = powf(std::max(colour.b, 0.0f), 1.0f / 2.2f);
+		return colour;
+	}
+	void saveHDRFromPixels(const std::string& filename, const std::vector<Colour>& pixels) const {
+		stbi_write_hdr(filename.c_str(), film->width, film->height, 3, (const float*)pixels.data());
+	}
+	void savePNGFromPixels(const std::string& filename, const std::vector<Colour>& pixels, bool tonemap = true) const {
+		std::vector<unsigned char> ldr(film->width * film->height * 3);
+		for (int y = 0; y < film->height; y++) {
+			for (int x = 0; x < film->width; x++) {
+				int pixelIndex = y * film->width + x;
+				Colour colour = tonemap ? tonemapColour(pixels[pixelIndex]) : pixels[pixelIndex];
+				unsigned int i = pixelIndex * 3;
+				ldr[i] = (unsigned char)(std::min(std::max(colour.r, 0.0f), 1.0f) * 255.0f);
+				ldr[i + 1] = (unsigned char)(std::min(std::max(colour.g, 0.0f), 1.0f) * 255.0f);
+				ldr[i + 2] = (unsigned char)(std::min(std::max(colour.b, 0.0f), 1.0f) * 255.0f);
+			}
+		}
+		stbi_write_png(filename.c_str(), film->width, film->height, 3, ldr.data(), film->width * 3);
+	}
+	std::vector<Colour> currentImagePixels() {
+		std::vector<Colour> pixels(film->width * film->height);
+		for (unsigned int i = 0; i < film->width * film->height; i++) {
+			pixels[i] = averagePixel(film->film[i]);
+		}
+		return pixels;
+	}
+	std::vector<Colour> averagedAOV(std::vector<Colour>& buffer) {
+		std::vector<Colour> pixels(film->width * film->height);
+		for (unsigned int i = 0; i < film->width * film->height; i++) {
+			pixels[i] = averagePixel(buffer[i]);
+		}
+		return pixels;
+	}
+	std::vector<Colour> normalAOVPreview() {
+		std::vector<Colour> pixels(film->width * film->height);
+		for (unsigned int i = 0; i < film->width * film->height; i++) {
+			Colour n = averagePixel(normalBuffer[i]);
+			pixels[i] = Colour(n.r * 0.5f + 0.5f, n.g * 0.5f + 0.5f, n.b * 0.5f + 0.5f);
+		}
+		return pixels;
+	}
+	bool denoise(std::vector<Colour>& denoisedPixels) {
+		int width = film->width;
+		int height = film->height;
+		size_t byteSize = (size_t)width * height * 3 * sizeof(float);
+
+		oidn::DeviceRef device = oidn::newDevice();
+		device.commit();
+
+		oidn::FilterRef filter = device.newFilter("RT");
+
+		oidn::BufferRef colorBuf = device.newBuffer(byteSize);
+		oidn::BufferRef albedoBuf = device.newBuffer(byteSize);
+		oidn::BufferRef normalBuf = device.newBuffer(byteSize);
+		oidn::BufferRef outputBuf = device.newBuffer(byteSize);
+
+		filter.setImage("color", colorBuf, oidn::Format::Float3, width, height);	// beauty
+		filter.setImage("albedo", albedoBuf, oidn::Format::Float3, width, height);	// auxiliary
+		filter.setImage("normal", normalBuf, oidn::Format::Float3, width, height);	// auxiliary
+		filter.setImage("output", outputBuf, oidn::Format::Float3, width, height);	// denoised beauty
+		filter.set("hdr", true);
+
+		filter.commit();
+
+		// Fill the input image buffers
+		float* colorPtr = (float*)colorBuf.getData();
+		float* albedoPtr = (float*)albedoBuf.getData();
+		float* normalPtr = (float*)normalBuf.getData();
+
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				int pixelIndex = y * width + x;
+				int bufferIndex = pixelIndex * 3;
+
+				Colour color = averagePixel(film->film[pixelIndex]);
+				Colour albedo = averagePixel(albedoBuffer[pixelIndex]);
+				Colour normal = averagePixel(normalBuffer[pixelIndex]);
+
+				colorPtr[bufferIndex] = color.r;
+				colorPtr[bufferIndex + 1] = color.g;
+				colorPtr[bufferIndex + 2] = color.b;
+
+				albedoPtr[bufferIndex] = albedo.r;
+				albedoPtr[bufferIndex + 1] = albedo.g;
+				albedoPtr[bufferIndex + 2] = albedo.b;
+
+				normalPtr[bufferIndex] = normal.r;
+				normalPtr[bufferIndex + 1] = normal.g;
+				normalPtr[bufferIndex + 2] = normal.b;
+			}
+		}
+
+		// Filter the beauty image
+		filter.execute();
+
+		// Check for errors
+		const char* errorMessage = nullptr;
+		if (device.getError(errorMessage) != oidn::Error::None) {
+			std::cout << "Error: " << errorMessage << std::endl;
+			return false;
+		}
+
+		// Copy denoised pixels out of outputBuffer
+		float* outputPtr = (float*)outputBuf.getData();
+		denoisedPixels.resize(width * height);
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				int pixelIndex = y * width + x;
+				int bufferIndex = pixelIndex * 3;
+				denoisedPixels[pixelIndex] = Colour(
+					outputPtr[bufferIndex],
+					outputPtr[bufferIndex + 1],
+					outputPtr[bufferIndex + 2]);
+			}
+		}
+
+		return true;
+	}
+	void saveFinalOutputs(std::string& baseName) {
+		std::vector<Colour> noisyPixels = currentImagePixels();
+		saveHDRFromPixels(baseName + ".hdr", noisyPixels);
+		savePNGFromPixels(baseName + ".png", noisyPixels);
+		savePNGFromPixels(baseName + "-albedo.png", averagedAOV(albedoBuffer), false);
+		savePNGFromPixels(baseName + "-normal.png", normalAOVPreview(), false);
+
+		std::vector<Colour> denoisedPixels;
+		if (denoise(denoisedPixels)) {
+			saveHDRFromPixels(baseName + "-denoised.hdr", denoisedPixels);
+			savePNGFromPixels(baseName + "-denoised.png", denoisedPixels);
+		}
 	}
 };

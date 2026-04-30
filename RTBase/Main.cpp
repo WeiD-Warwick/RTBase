@@ -7,6 +7,13 @@
 #include "GamesEngineeringBase.h"
 #include <unordered_map>
 
+std::string outputBaseName(const std::string& sceneName, int spp) {
+	size_t pos = sceneName.find_last_of("/\\");
+	std::string shortSceneName = (pos == std::string::npos) ? sceneName : sceneName.substr(pos + 1);
+	std::string runName = shortSceneName + "-" + std::to_string(spp);
+	return "results\\" + runName;
+}
+
 void runTests()
 {
 	// Plane test
@@ -58,7 +65,7 @@ int main(int argc, char *argv[])
 	//std::string sceneName = "Assets/living-room-3";
 	//std::string sceneName = "Assets/glass-of-water";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 8192;
+	unsigned int SPP = 64;//8192;
 
 	if (argc > 1)
 	{
@@ -182,7 +189,10 @@ int main(int argc, char *argv[])
 		}
 		if (SPP == rt.getSPP())
 		{
-			rt.saveHDR(filename);
+			std::string baseName = outputBaseName(sceneName, SPP);
+			std::cout << "Saving " << baseName << " outputs..." << std::endl;
+			rt.saveFinalOutputs(baseName);
+			std::cout << "Done." << std::endl;
 			break;
 		}
 		canvas.present();
