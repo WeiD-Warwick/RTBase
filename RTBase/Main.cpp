@@ -50,22 +50,22 @@ void runTests()
 	std::cout << "Triangle hit: " << hit3 << ", t: " << t3 << " u: " << u << " v: " << v << std::endl;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
 	// Add call to tests if required
 	// runTests();
 
 	// Initialize default parameters
-	//std::string sceneName = "Assets/cornell-box";
+	std::string sceneName = "Assets/cornell-box";
 	//std::string sceneName = "Assets/MaterialsScene";
-	std::string sceneName = "Assets/bathroom";
+	//std::string sceneName = "Assets/bathroom";
 	//std::string sceneName = "Assets/bathroom2";
 	//std::string sceneName = "Assets/living-room";
 	//std::string sceneName = "Assets/living-room-2";
 	//std::string sceneName = "Assets/living-room-3";
 	//std::string sceneName = "Assets/glass-of-water";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 64;//8192;
+	unsigned int SPP = 16;//8192;
 
 	if (argc > 1)
 	{
@@ -80,11 +80,13 @@ int main(int argc, char *argv[])
 				{
 					std::string argValue = argv[++i];
 					args[argName] = argValue;
-				} else
+				}
+				else
 				{
 					std::cerr << "Error: Missing value for argument '" << arg << "'\n";
 				}
-			} else
+			}
+			else
 			{
 				std::cerr << "Warning: Ignoring unexpected argument '" << arg << "'\n";
 			}
@@ -151,26 +153,7 @@ int main(int argc, char *argv[])
 			viewcamera.flyDown();
 			rt.clear();
 		}
-		if (canvas.keyPressed('1')) {
-			rt.setRenderMode(RayTracer::RenderMode::PathTrace);
-			rt.clear();
-			std::cout << "Render mode: PathTrace" << std::endl;
-		}
-		if (canvas.keyPressed('2')) {
-			rt.setRenderMode(RayTracer::RenderMode::DebugSNormal);
-			rt.clear();
-			std::cout << "Render mode: DebugSNormal" << std::endl;
-		}
-		if (canvas.keyPressed('3')) {
-			rt.setRenderMode(RayTracer::RenderMode::DebugGNormal);
-			rt.clear();
-			std::cout << "Render mode: DebugGNormal" << std::endl;
-		}
-		if (canvas.keyPressed('4')) {
-			rt.setRenderMode(RayTracer::RenderMode::DebugNormalDelta);
-			rt.clear();
-			std::cout << "Render mode: DebugNormalDelta" << std::endl;
-		}
+
 		// Time how long a render call takes
 		timer.reset();
 		rt.render();

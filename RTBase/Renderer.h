@@ -19,9 +19,12 @@ class RayTracer
 public:
 	enum class RenderMode {
 		PathTrace,
-		DebugSNormal,
-		DebugGNormal,
-		DebugNormalDelta,
+		InstantRadiosity,
+	};
+
+	struct VPL {
+		ShadingData shadingData;
+		Colour Le;
 	};
 
 	Scene* scene;
@@ -30,10 +33,12 @@ public:
 	MTRandom *samplers;
 	std::thread **threads;
 	int numProcs;
+	//RenderMode renderMode = RenderMode::InstantRadiosity;
 	RenderMode renderMode = RenderMode::PathTrace;
 	float fireflyClamp = 10.0f;
 	std::vector<Colour> albedoBuffer;
 	std::vector<Colour> normalBuffer;
+	std::vector<VPL> vpls;
 
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
@@ -104,6 +109,115 @@ public:
 	Vec3 offsetRayOrigin(const Vec3& x, const Vec3& gNormal, const Vec3& w) {
 		float side = Dot(w, gNormal) >= 0.0f ? 1.0f : -1.0f;
 		return x + gNormal * (EPSILON * side);
+	}
+
+	void generateVPLs() {
+		const int numVPLPaths = 256;
+		const int maxVPLDepth = 4;
+		MTRandom lightSampler(film->SPP + 1);
+
+		vpls.clear();
+		vpls.reserve(numVPLPaths * maxVPLDepth);
+
+		// ShadingData created at each interaction when creating VPLS
+		for (int pathIndex = 0; pathIndex < numVPLPaths; pathIndex++) {
+			float lightPmf = 0.0f;
+			Light* light = scene->sampleLight(&lightSampler, lightPmf);
+			if (light == NULL || !light->isArea() || lightPmf <= 0.0f) continue;
+			AreaLight* areaLight = dynamic_cast<AreaLight*>(light);
+			if (areaLight == NULL) continue;
+
+			float positionPdf = 0.0f;
+			Vec3 lightPosition = light->samplePositionFromLight(&lightSampler, positionPdf);
+			if (positionPdf <= 0.0f) continue;
+
+			float directionPdf = 0.0f;
+			Vec3 lightDirection = light->sampleDirectionFromLight(&lightSampler, directionPdf).normalize();
+			if (directionPdf <= 0.0f) continue;
+
+			Vec3 lightNormal = areaLight->triangle->gNormal();
+			float cosThetaLight = Dot(lightDirection, lightNormal);
+			if (cosThetaLight <= 0.0f) continue;
+
+			Colour emission = light->evaluate(-lightDirection);
+			if (emission.Lum() <= 0.0f) continue;
+
+			Colour throughput = emission * (cosThetaLight / (lightPmf * positionPdf * directionPdf));
+			Ray ray(offsetRayOrigin(lightPosition, lightNormal, lightDirection), lightDirection);
+
+			for (int depth = 0; depth < maxVPLDepth; depth++) {
+				IntersectionData intersection = scene->traverse(ray);
+				ShadingData shadingData = scene->calculateShadingData(intersection, ray);
+				if (shadingData.t >= FLT_MAX) break;
+				if (shadingData.bsdf->isLight()) break;
+
+				if (!shadingData.bsdf->isPureSpecular()) {
+					VPL vpl;
+					vpl.shadingData = shadingData;
+					vpl.Le = throughput / float(numVPLPaths);
+					vpls.push_back(vpl);
+				}
+
+				float pdf = 0.0f;
+				Colour reflectedColour;
+				Vec3 wi = shadingData.bsdf->sample(shadingData, &lightSampler, reflectedColour, pdf);
+				if (pdf <= 0.0f) break;
+
+				float absCosTheta = fabsf(Dot(wi, shadingData.sNormal));
+				if (absCosTheta <= 0.0f) break;
+
+				throughput = throughput * reflectedColour * absCosTheta / pdf;
+				if (throughput.Lum() <= 0.0f) break;
+
+				ray = Ray(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
+			}
+		}
+	}
+
+	Colour computeVPLContribution(const ShadingData& shadingData, const VPL& vpl) {
+		const float minDistanceSquared = 0.01f;
+		Vec3 toVPL = vpl.shadingData.x - shadingData.x;
+		float distanceSquared = toVPL.lengthSq();
+		if (distanceSquared <= minDistanceSquared) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		float distance = sqrtf(distanceSquared);
+		Vec3 wi = toVPL / distance;
+		float cosThetaX = Dot(shadingData.sNormal, wi);
+		float cosThetaVPL = Dot(vpl.shadingData.sNormal, -wi);
+		if (cosThetaX <= 0.0f || cosThetaVPL <= 0.0f) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		float maxT = distance - (2.0f * EPSILON);
+		if (maxT <= EPSILON) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		Ray shadowRay(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
+		if (!scene->bvh->traverseVisible(shadowRay, scene->triangles, maxT)) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		Colour bsdfAtX = shadingData.bsdf->evaluate(shadingData, wi);
+		Colour bsdfAtVPL = vpl.shadingData.bsdf->evaluate(vpl.shadingData, -wi);
+		float G = (cosThetaX * cosThetaVPL) / distanceSquared;
+
+		return vpl.Le * bsdfAtVPL * bsdfAtX * G;
+	}
+
+	Colour computeIndirectLightingFromVPLs(const ShadingData& shadingData) {
+		if (shadingData.bsdf->isPureSpecular()) {
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+
+		Colour indirect(0.0f, 0.0f, 0.0f);
+		// Iterate over all stored VPLs
+		for (const VPL& vpl : vpls) {
+			// Compute Contribution
+			indirect = indirect + computeVPLContribution(shadingData, vpl);
+		}
+		return indirect;
 	}
 
 	// NEE (pdf base Light Area)
@@ -312,7 +426,24 @@ public:
 		return scene->background->evaluate(r.dir);
 	}
 
-	Colour materialAlbedo(BSDF* bsdf, const ShadingData& shadingData) {
+	Colour instantRadiosity(Ray& r, Sampler* sampler)
+	{
+		// Trace ray
+		IntersectionData intersection = scene->traverse(r);
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		if (shadingData.t >= FLT_MAX) {
+			return scene->background->evaluate(r.dir);
+		}
+		if (shadingData.bsdf->isLight()) {
+			return shadingData.bsdf->emit(shadingData, shadingData.wo);
+		}
+
+		Colour directLighting = computeDirect(shadingData, sampler);
+		Colour indirectLighting = computeIndirectLightingFromVPLs(shadingData);
+		return directLighting + indirectLighting;
+	}
+
+	Colour materialAlbedo(BSDF* bsdf, ShadingData& shadingData) {
 		if (DiffuseBSDF* material = dynamic_cast<DiffuseBSDF*>(bsdf)) {
 			return material->albedo->sample(shadingData.tu, shadingData.tv);
 		}
@@ -369,26 +500,13 @@ public:
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 
-	Colour viewGNormals(Ray& r) {
-		IntersectionData intersection = scene->traverse(r);
-		if (intersection.t < FLT_MAX) {
-			ShadingData shadingData = scene->calculateShadingData(intersection, r);
-			return Colour(fabsf(shadingData.gNormal.x), fabsf(shadingData.gNormal.y), fabsf(shadingData.gNormal.z));
-		}
-		return Colour(0.0f, 0.0f, 0.0f);
-	}
-	Colour viewNormalDelta(Ray& r) {
-		IntersectionData intersection = scene->traverse(r);
-		if (intersection.t < FLT_MAX) {
-			ShadingData shadingData = scene->calculateShadingData(intersection, r);
-			Vec3 d = shadingData.sNormal - shadingData.gNormal;
-			return Colour(fabsf(d.x), fabsf(d.y), fabsf(d.z));
-		}
-		return Colour(0.0f, 0.0f, 0.0f);
-	}
 	void render()
 	{
 		film->incrementSPP();
+		if (renderMode == RenderMode::InstantRadiosity) {
+			generateVPLs();
+		}
+
 		std::atomic<int> nextTile(0);
 		const int tileSize = 16;
 		const int tilesX = (film->width + tileSize - 1) / tileSize;
@@ -422,8 +540,21 @@ public:
 							float py = y + samplers[i].next();
 
 							Ray ray = scene->camera.generateRay(px, py);
-							Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
-							Colour col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
+							Colour col;
+							switch (renderMode) {
+							case RenderMode::PathTrace:
+							{
+								Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+								col = pathTrace(ray, pathThroughput, 0, &samplers[i], nullptr, 0.0f);
+								break;
+							}
+							case RenderMode::InstantRadiosity:
+								col = instantRadiosity(ray, &samplers[i]);
+								break;
+							default:
+								col = Colour(0.0f, 0.0f, 0.0f);
+								break;
+							}
 
 							int pixelIndex = y * film->width + x;
 							albedoBuffer[pixelIndex] = albedoBuffer[pixelIndex] + albedo(ray);
