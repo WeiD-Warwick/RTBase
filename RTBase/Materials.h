@@ -257,7 +257,7 @@ public:
 			pdf = 1.0f;
 			return wiWorld;
 		}
-		Vec3 halfwayLocal = SamplingDistributions::sampleGGXVNDF(woLocal, alpha, sampler->next(), sampler->next());
+		Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
 		Vec3 wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
 		if (wiLocal.z <= 0.0f) {
 			pdf = 0.0f;
@@ -414,7 +414,7 @@ public:
 			reflectedColour = Colour(0, 0, 0);
 			return Vec3(0, 0, 1);
 		}
-		Vec3 halfwayLocal = SamplingDistributions::sampleGGXVNDF(woLocal, alpha, sampler->next(), sampler->next());
+		Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
 		float fresnelReflectance = ShadingHelper::fresnelDielectric(Dot(woLocal, halfwayLocal), intIOR, extIOR);
 		Vec3 wiLocal;
 		if (sampler->next() < fresnelReflectance) {
@@ -613,7 +613,7 @@ public:
 		float specularProbability = std::min(std::max(fresnelReflectance, 0.05f), 0.95f);
 		Vec3 wiLocal;
 		if (sampler->next() < specularProbability) {
-			Vec3 halfwayLocal = SamplingDistributions::sampleGGXVNDF(woLocal, alpha, sampler->next(), sampler->next());
+			Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
 			wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
 		}
 		else {

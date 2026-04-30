@@ -95,7 +95,7 @@ public:
 		return 1.0f / (4.0f * M_PI);
 	}
 
-	static Vec3 sampleGGXVNDF(const Vec3& wo, float alpha, float r1, float r2) {
+	static Vec3 sampleGGXNDF(const Vec3& wo, float alpha, float r1, float r2) {
 		float a = std::max(alpha, 0.001f);
 		float phi = 2.0f * M_PI * r1;
 		float tan2Theta = (a * a) * r2 / std::max(1.0f - r2, 1e-6f);
