@@ -121,9 +121,10 @@ public:
 		vpls.clear();
 		vpls.reserve(numVPLPaths * maxVPLDepth);
 
-		// ShadingData created at each interaction when creating VPLS
+		// Trace light paths for VPLs
 		for (int pathIndex = 0; pathIndex < numVPLPaths; pathIndex++) {
 			float lightPmf = 0.0f;
+			// Pick area light source
 			Light* light = scene->sampleLight(&lightSampler, lightPmf);
 			if (light == NULL || !light->isArea() || lightPmf <= 0.0f) continue;
 			AreaLight* areaLight = dynamic_cast<AreaLight*>(light);
@@ -144,6 +145,7 @@ public:
 			Colour emission = light->evaluate(-lightDirection);
 			if (emission.Lum() <= 0.0f) continue;
 
+			// Initial light throughput
 			Colour throughput = emission * (cosThetaLight / (lightPmf * positionPdf * directionPdf));
 			Ray ray(offsetRayOrigin(lightPosition, lightNormal, lightDirection), lightDirection);
 
@@ -154,6 +156,7 @@ public:
 				if (shadingData.bsdf->isLight()) break;
 
 				if (!shadingData.bsdf->isPureSpecular()) {
+					// Store normal hit as VPL
 					VPL vpl;
 					vpl.shadingData = shadingData;
 					vpl.Le = throughput / float(numVPLPaths);
@@ -178,6 +181,7 @@ public:
 
 	Colour computeVPLContribution(const ShadingData& shadingData, const VPL& vpl) {
 		const float minDistanceSquared = 0.01f;
+		// Connect shading point to VPL
 		Vec3 toVPL = vpl.shadingData.x - shadingData.x;
 		float distanceSquared = toVPL.lengthSq();
 		if (distanceSquared <= minDistanceSquared) {
@@ -196,6 +200,7 @@ public:
 		if (maxT <= EPSILON) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
+		// VPL visibility
 		Ray shadowRay(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
 		if (!scene->bvh->traverseVisible(shadowRay, scene->triangles, maxT)) {
 			return Colour(0.0f, 0.0f, 0.0f);
@@ -203,6 +208,7 @@ public:
 
 		Colour bsdfAtX = shadingData.bsdf->evaluate(shadingData, wi);
 		Colour bsdfAtVPL = vpl.shadingData.bsdf->evaluate(vpl.shadingData, -wi);
+		// Geometry
 		float G = (cosThetaX * cosThetaVPL) / distanceSquared;
 
 		return vpl.Le * bsdfAtVPL * bsdfAtX * G;
@@ -214,9 +220,9 @@ public:
 		}
 
 		Colour indirect(0.0f, 0.0f, 0.0f);
-		// Iterate over all stored VPLs
+		// accumulate stored VPLs
 		for (const VPL& vpl : vpls) {
-			// Compute Contribution
+			// add VPL contribution
 			indirect = indirect + computeVPLContribution(shadingData, vpl);
 		}
 		return indirect;
@@ -448,6 +454,7 @@ public:
 	void connectToCamera(Vec3 p, Vec3 n, Colour col) {
 		float px = 0.0f;
 		float py = 0.0f;
+		// Project to film
 		if (!scene->camera.projectOntoCamera(p, px, py)) return;
 
 		Vec3 toCamera = scene->camera.origin - p;
@@ -464,14 +471,17 @@ public:
 
 		if (!scene->visible(p, scene->camera.origin)) return;
 
+		// Camera connection weight
 		float G = cosSurface * cosCamera / dist2;
 		float We = 1.0f / (scene->camera.Afilm * SQ(SQ(cosCamera)));
 		Colour contribution = clampSample(col * G * We);
+		// Splat light contribution
 		film->splat(px, py, contribution);
 	}
 
 	void lightTracePath(Ray& r, Colour pathThroughput, Colour Le, Sampler* sampler, int depth) {
 		const int maxDepth = 8;
+		// Advance light subpath
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 		if (shadingData.t >= FLT_MAX || shadingData.bsdf->isLight()) return;
@@ -484,11 +494,13 @@ public:
 			cameraShadingData.sNormal = -cameraShadingData.sNormal;
 			cameraShadingData.frame.fromVector(cameraShadingData.sNormal);
 		}
+		// Connect light vertex to camera
 		Colour col = pathThroughput * cameraShadingData.bsdf->evaluate(cameraShadingData, shadingData.wo) * Le;
 		connectToCamera(cameraShadingData.x, cameraShadingData.sNormal, col);
 
 		if (depth >= maxDepth) return;
 
+		// Sample next light bounce
 		float pdf = 0.0f;
 		Colour reflectedColour;
 		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);
@@ -501,6 +513,7 @@ public:
 		if (nextPathThroughput.Lum() <= 0.0f) return;
 
 		if (depth >= 3) {
+			// Russian Roulette
 			float continueProbability = std::min(nextPathThroughput.Lum(), 0.95f);
 			if (continueProbability <= 0.0f || sampler->next() > continueProbability) return;
 			nextPathThroughput = nextPathThroughput / continueProbability;
@@ -512,6 +525,7 @@ public:
 
 	void lightTrace(Sampler* sampler) {
 		float lightPmf = 0.0f;
+		// Start from area light
 		Light* light = scene->sampleLight(sampler, lightPmf);
 		if (light == NULL || !light->isArea() || lightPmf <= 0.0f) return;
 
@@ -526,8 +540,10 @@ public:
 
 		Vec3 wiCamera = (scene->camera.origin - p).normalize();
 		Colour cameraLe = light->evaluate(-wiCamera);
+		// Direct light to camera
 		connectToCamera(p, n, cameraLe / (lightPmf * positionPdf));
 
+		// Sample emitted direction
 		float directionPdf = 0.0f;
 		Vec3 wi = light->sampleDirectionFromLight(sampler, directionPdf).normalize();
 		if (directionPdf <= 0.0f) return;
