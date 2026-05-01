@@ -77,10 +77,10 @@ int main(int argc, char* argv[])
 	// Initialize default parameters
 	//std::string sceneName = "Assets/cornell-box";
 	//std::string sceneName = "Assets/MaterialsScene";
-	//std::string sceneName = "Assets/kitchen";
+	std::string sceneName = "Assets/kitchen";
 	//std::string sceneName = "Assets/bathroom";
 	//std::string sceneName = "Assets/living-room-2";
-	std::string sceneName = "Assets/living-room-3";
+	//std::string sceneName = "Assets/bedroom";
 	std::string filename = "GI.hdr";
 	//unsigned int SPP = 8192;
 	unsigned int SPP = 256;
