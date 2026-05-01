@@ -75,8 +75,8 @@ int main(int argc, char* argv[])
 	// runTests();
 
 	// Initialize default parameters
-	//std::string sceneName = "Assets/cornell-box";
-	std::string sceneName = "Assets/MaterialsScene";
+	std::string sceneName = "Assets/cornell-box";
+	//std::string sceneName = "Assets/MaterialsScene";
 	//std::string sceneName = "Assets/bathroom";
 	//std::string sceneName = "Assets/bathroom2";
 	//std::string sceneName = "Assets/living-room";
@@ -84,8 +84,11 @@ int main(int argc, char* argv[])
 	//std::string sceneName = "Assets/living-room-3";
 	//std::string sceneName = "Assets/glass-of-water";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 32;//8192;
-	RayTracer::RenderMode renderMode = RayTracer::RenderMode::PathTrace;
+	//unsigned int SPP = 8192;
+	unsigned int SPP = 32;
+	//RayTracer::RenderMode renderMode = RayTracer::RenderMode::PathTrace;
+	//RayTracer::RenderMode renderMode = RayTracer::RenderMode::InstantRadiosity;
+	RayTracer::RenderMode renderMode = RayTracer::RenderMode::LightTrace;
 
 	if (argc > 1)
 	{

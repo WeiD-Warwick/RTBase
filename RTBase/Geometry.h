@@ -56,7 +56,6 @@ public:
 		extend(aabb.max);
 		extend(aabb.min);
 	}
-	// Add code here
 	bool rayAABB(const Ray& r, float& t)
 	{
 		Vec3 Tmin = (min - r.o) * r.invDir;
@@ -72,20 +71,6 @@ public:
 		t = (tentry < 0.0f) ? 0.0f : tentry;
 		return true;
 	}
-	// Add code here
-	bool rayAABB(const Ray& r)
-	{
-		Vec3 Tmin = (min - r.o) * r.invDir;
-		Vec3 Tmax = (max - r.o) * r.invDir;
-		Vec3 Tentry = Min(Tmin, Tmax);
-		Vec3 Texit = Max(Tmin, Tmax);
-
-		float tentry = std::max(Tentry.x, std::max(Tentry.y, Tentry.z));
-		float texit = std::min(Texit.x, std::min(Texit.y, Texit.z));
-
-		return (tentry <= texit && texit >= 0.0f);
-	}
-	// Add code here
 	float area()
 	{
 		Vec3 size = max - min;
@@ -321,8 +306,8 @@ public:
 			return;
 		}
 
-		if (l) l->traverse(ray, triangles, intersection);
-		if (r) r->traverse(ray, triangles, intersection);
+		l->traverse(ray, triangles, intersection);
+		r->traverse(ray, triangles, intersection);
 	}
 	IntersectionData traverse(const Ray& ray, const std::vector<Triangle>& triangles)
 	{
@@ -352,10 +337,10 @@ public:
 			return true;
 		}
 
-		if (l && !l->traverseVisible(ray, triangles, maxT))
+		if (!l->traverseVisible(ray, triangles, maxT))
 			return false;
 
-		if (r && !r->traverseVisible(ray, triangles, maxT))
+		if (!r->traverseVisible(ray, triangles, maxT))
 			return false;
 
 		return true;
@@ -381,13 +366,9 @@ private:
 		float maxC = getAxisStepSize(centroidBounds.max, axis);
 		float extent = maxC - minC;
 
-		if (extent <= EPSILON)
-			return 0;
-
 		float normalized = (c - minC) / extent;
 		int binIndex = static_cast<int>(normalized * BUILD_BINS);
 
-		if (binIndex < 0) binIndex = 0;
 		if (binIndex >= BUILD_BINS) binIndex = BUILD_BINS - 1;
 
 		return binIndex;
@@ -431,7 +412,6 @@ private:
 		AABB centroidBounds;
 		centroidBounds.reset();
 
-		// Place all the center points of triangles(start...start+count) into an AABB.
 		for (int i = start; i < start + count; i++) {
 			centroidBounds.extend(inputTriangles[i].centre());
 		}
@@ -525,20 +505,12 @@ private:
 			}
 		}
 
-		if (bestAxis == -1) {
-			return;
-		}
-
 		if (bestCost >= leafCost) {
 			return;
 		}
 
 		int leftCountFinal = divideTrianglesByBin(inputTriangles, start, count, bestAxis, bestSplit, centroidBounds);
 		int rightCountFinal = count - leftCountFinal;
-
-		if (leftCountFinal == 0 || rightCountFinal == 0) {
-			return;
-		}
 
 		_count = 0;
 

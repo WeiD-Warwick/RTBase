@@ -433,8 +433,7 @@ public:
 		return scene->background->evaluate(r.dir);
 	}
 
-	Colour instantRadiosity(Ray& r, Sampler* sampler)
-	{
+	Colour instantRadiosity(Ray& r, Sampler* sampler) {
 		// Trace ray
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
@@ -524,36 +523,49 @@ public:
 
 	void lightTrace(Sampler* sampler) {
 		float lightPmf = 0.0f;
-		// Start from area light
+		// Start from light source
 		Light* light = scene->sampleLight(sampler, lightPmf);
-		if (light == NULL || !light->isArea() || lightPmf <= 0.0f) return;
-
-		AreaLight* areaLight = dynamic_cast<AreaLight*>(light);
-		if (areaLight == NULL) return;
+		if (light == NULL || lightPmf <= 0.0f) return;
 
 		float positionPdf = 0.0f;
-		Vec3 p = light->samplePositionFromLight(sampler, positionPdf);
+		Vec3 position = light->samplePositionFromLight(sampler, positionPdf);
 		if (positionPdf <= 0.0f) return;
 
-		Vec3 n = areaLight->triangle->gNormal();
+		Vec3 normal;
+		Vec3 wi;
+		float directionPdf = 0.0f;
 
-		Vec3 wiCamera = (scene->camera.origin - p).normalize();
+		if (light->isArea()) {
+			AreaLight* areaLight = dynamic_cast<AreaLight*>(light);
+			if (areaLight == NULL) return;
+
+			normal = areaLight->triangle->gNormal();
+			wi = light->sampleDirectionFromLight(sampler, directionPdf).normalize();
+		}
+		else {
+			normal = (use<SceneBounds>().sceneCentre - position).normalize();
+
+			Vec3 wiLocal = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
+			directionPdf = SamplingDistributions::cosineHemispherePDF(wiLocal);
+			Frame frame;
+			frame.fromVector(normal);
+			wi = frame.toWorld(wiLocal);
+		}
+
+		Vec3 wiCamera = (scene->camera.origin - position).normalize();
 		Colour cameraLe = light->evaluate(-wiCamera);
 		// Direct light to camera
-		connectToCamera(p, n, cameraLe / (lightPmf * positionPdf));
+		connectToCamera(position, normal, cameraLe / (lightPmf * positionPdf));
 
-		// Sample emitted direction
-		float directionPdf = 0.0f;
-		Vec3 wi = light->sampleDirectionFromLight(sampler, directionPdf).normalize();
 		if (directionPdf <= 0.0f) return;
 
-		float cosTheta = Dot(wi, n);
+		float cosTheta = Dot(wi, normal);
 		if (cosTheta <= 0.0f) return;
 
 		Colour Le = light->evaluate(-wi) * (cosTheta / (lightPmf * positionPdf * directionPdf));
 		if (Le.Lum() <= 0.0f) return;
 
-		Ray r(offsetRayOrigin(p, n, wi), wi);
+		Ray r(offsetRayOrigin(position, normal, wi), wi);
 		lightTracePath(r, Colour(1.0f, 1.0f, 1.0f), Le, sampler, 0);
 	}
 
@@ -751,21 +763,6 @@ public:
 		}
 		return pixels;
 	}
-	std::vector<Colour> averagedAOV(std::vector<Colour>& buffer) {
-		std::vector<Colour> pixels(film->width * film->height);
-		for (unsigned int i = 0; i < film->width * film->height; i++) {
-			pixels[i] = averagePixel(buffer[i]);
-		}
-		return pixels;
-	}
-	std::vector<Colour> normalAOVPreview() {
-		std::vector<Colour> pixels(film->width * film->height);
-		for (unsigned int i = 0; i < film->width * film->height; i++) {
-			Colour n = averagePixel(normalBuffer[i]);
-			pixels[i] = Colour(n.r * 0.5f + 0.5f, n.g * 0.5f + 0.5f, n.b * 0.5f + 0.5f);
-		}
-		return pixels;
-	}
 	bool denoise(std::vector<Colour>& denoisedPixels) {
 		int width = film->width;
 		int height = film->height;
@@ -847,8 +844,6 @@ public:
 		std::vector<Colour> noisyPixels = currentImagePixels();
 		saveHDRFromPixels(baseName + ".hdr", noisyPixels);
 		savePNGFromPixels(baseName + ".png", noisyPixels);
-		savePNGFromPixels(baseName + "-albedo.png", averagedAOV(albedoBuffer), false);
-		savePNGFromPixels(baseName + "-normal.png", normalAOVPreview(), false);
 
 		std::vector<Colour> denoisedPixels;
 		if (denoise(denoisedPixels)) {
