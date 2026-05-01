@@ -20,6 +20,7 @@ public:
 	enum class RenderMode {
 		PathTrace,
 		InstantRadiosity,
+		LightTrace,
 	};
 
 	struct VPL {
@@ -35,6 +36,7 @@ public:
 	int numProcs;
 	//RenderMode renderMode = RenderMode::InstantRadiosity;
 	RenderMode renderMode = RenderMode::PathTrace;
+	//RenderMode renderMode = RenderMode::LightTrace;
 	float fireflyClamp = 10.0f;
 	std::vector<Colour> albedoBuffer;
 	std::vector<Colour> normalBuffer;
@@ -443,6 +445,103 @@ public:
 		return directLighting + indirectLighting;
 	}
 
+	void connectToCamera(Vec3 p, Vec3 n, Colour col) {
+		float px = 0.0f;
+		float py = 0.0f;
+		if (!scene->camera.projectOntoCamera(p, px, py)) return;
+
+		Vec3 toCamera = scene->camera.origin - p;
+		float dist2 = toCamera.lengthSq();
+		if (dist2 <= EPSILON) return;
+
+		float dist = sqrtf(dist2);
+		Vec3 wi = toCamera / dist;
+		float cosSurface = Dot(n, wi);
+		if (cosSurface <= 0.0f) return;
+
+		float cosCamera = Dot(-wi, scene->camera.viewDirection);
+		if (cosCamera <= 0.0f || scene->camera.Afilm <= 0.0f) return;
+
+		if (!scene->visible(p, scene->camera.origin)) return;
+
+		float G = cosSurface * cosCamera / dist2;
+		float We = 1.0f / (scene->camera.Afilm * SQ(SQ(cosCamera)));
+		Colour contribution = clampSample(col * G * We);
+		film->splat(px, py, contribution);
+	}
+
+	void lightTracePath(Ray& r, Colour pathThroughput, Colour Le, Sampler* sampler, int depth) {
+		const int maxDepth = 8;
+		IntersectionData intersection = scene->traverse(r);
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		if (shadingData.t >= FLT_MAX || shadingData.bsdf->isLight()) return;
+
+		Vec3 wiCamera = (scene->camera.origin - shadingData.x).normalize();
+		ShadingData cameraShadingData = shadingData;
+		cameraShadingData.wo = wiCamera;
+		if (cameraShadingData.bsdf->isTwoSided() && Dot(cameraShadingData.wo, cameraShadingData.gNormal) < 0.0f) {
+			cameraShadingData.gNormal = -cameraShadingData.gNormal;
+			cameraShadingData.sNormal = -cameraShadingData.sNormal;
+			cameraShadingData.frame.fromVector(cameraShadingData.sNormal);
+		}
+		Colour col = pathThroughput * cameraShadingData.bsdf->evaluate(cameraShadingData, shadingData.wo) * Le;
+		connectToCamera(cameraShadingData.x, cameraShadingData.sNormal, col);
+
+		if (depth >= maxDepth) return;
+
+		float pdf = 0.0f;
+		Colour reflectedColour;
+		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);
+		if (pdf <= 0.0f) return;
+
+		float absCosTheta = fabsf(Dot(wi, shadingData.sNormal));
+		if (absCosTheta <= 0.0f) return;
+
+		Colour nextPathThroughput = pathThroughput * reflectedColour * absCosTheta / pdf;
+		if (nextPathThroughput.Lum() <= 0.0f) return;
+
+		if (depth >= 3) {
+			float continueProbability = std::min(nextPathThroughput.Lum(), 0.95f);
+			if (continueProbability <= 0.0f || sampler->next() > continueProbability) return;
+			nextPathThroughput = nextPathThroughput / continueProbability;
+		}
+
+		Ray nextRay(offsetRayOrigin(shadingData.x, shadingData.gNormal, wi), wi);
+		lightTracePath(nextRay, nextPathThroughput, Le, sampler, depth + 1);
+	}
+
+	void lightTrace(Sampler* sampler) {
+		float lightPmf = 0.0f;
+		Light* light = scene->sampleLight(sampler, lightPmf);
+		if (light == NULL || !light->isArea() || lightPmf <= 0.0f) return;
+
+		AreaLight* areaLight = dynamic_cast<AreaLight*>(light);
+		if (areaLight == NULL) return;
+
+		float positionPdf = 0.0f;
+		Vec3 p = light->samplePositionFromLight(sampler, positionPdf);
+		if (positionPdf <= 0.0f) return;
+
+		Vec3 n = areaLight->triangle->gNormal();
+
+		Vec3 wiCamera = (scene->camera.origin - p).normalize();
+		Colour cameraLe = light->evaluate(-wiCamera);
+		connectToCamera(p, n, cameraLe / (lightPmf * positionPdf));
+
+		float directionPdf = 0.0f;
+		Vec3 wi = light->sampleDirectionFromLight(sampler, directionPdf).normalize();
+		if (directionPdf <= 0.0f) return;
+
+		float cosTheta = Dot(wi, n);
+		if (cosTheta <= 0.0f) return;
+
+		Colour Le = light->evaluate(-wi) * (cosTheta / (lightPmf * positionPdf * directionPdf));
+		if (Le.Lum() <= 0.0f) return;
+
+		Ray r(offsetRayOrigin(p, n, wi), wi);
+		lightTracePath(r, Colour(1.0f, 1.0f, 1.0f), Le, sampler, 0);
+	}
+
 	Colour materialAlbedo(BSDF* bsdf, ShadingData& shadingData) {
 		if (DiffuseBSDF* material = dynamic_cast<DiffuseBSDF*>(bsdf)) {
 			return material->albedo->sample(shadingData.tu, shadingData.tv);
@@ -503,8 +602,24 @@ public:
 	void render()
 	{
 		film->incrementSPP();
+
 		if (renderMode == RenderMode::InstantRadiosity) {
 			generateVPLs();
+		}
+
+		if (renderMode == RenderMode::LightTrace) {
+			int lightPathCount = film->width * film->height;
+			for (int i = 0; i < lightPathCount; i++) {
+				lightTrace(&samplers[0]);
+			}
+			for (int y = 0; y < film->height; y++) {
+				for (int x = 0; x < film->width; x++) {
+					unsigned char r, g, b;
+					film->tonemap(x, y, r, g, b);
+					canvas->draw(x, y, r, g, b);
+				}
+			}
+			return;
 		}
 
 		std::atomic<int> nextTile(0);
@@ -524,15 +639,6 @@ public:
 					int yStart = tileY * tileSize;
 					int xEnd = std::min((int)film->width, xStart + tileSize);
 					int yEnd = std::min((int)film->height, yStart + tileSize);
-					// avoid Gaussianfilter race
-					int filterRadius = film->filter->size();
-					int tileBufferXStart = std::max(0, xStart - filterRadius);
-					int tileBufferYStart = std::max(0, yStart - filterRadius);
-					int tileBufferXEnd = std::min((int)film->width, xEnd + filterRadius);
-					int tileBufferYEnd = std::min((int)film->height, yEnd + filterRadius);
-					unsigned int tileBufferWidth = tileBufferXEnd - tileBufferXStart;
-					unsigned int tileBufferHeight = tileBufferYEnd - tileBufferYStart;
-					std::vector<Colour> tileBuffer(tileBufferWidth * tileBufferHeight);
 
 					for (int y = yStart; y < yEnd; y++) {
 						for (int x = xStart; x < xEnd; x++) {
@@ -561,11 +667,10 @@ public:
 							normalBuffer[pixelIndex] = normalBuffer[pixelIndex] + normalAOV(ray);
 
 							col = clampSample(col);
-							film->splatToTile(px, py, col, tileBuffer.data(), tileBufferXStart, tileBufferYStart, tileBufferWidth, tileBufferHeight);
+							film->splat(px, py, col);
 						}
 					}
 
-					film->mergeTile(tileBuffer.data(), tileBufferXStart, tileBufferYStart, tileBufferWidth, tileBufferHeight);
 					for (int y = yStart; y < yEnd; y++) {
 						for (int x = xStart; x < xEnd; x++) {
 							unsigned char r, g, b;
