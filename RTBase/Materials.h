@@ -269,11 +269,11 @@ public:
 		albedo = _albedo;
 		eta = _eta;
 		k = _k;
-		alpha = 1.62142f * sqrtf(roughness);
+		alpha = roughness < EPSILON ? 0.0f : 1.62142f * sqrtf(roughness);
 	}
 	bool isSmooth()
 	{
-		return alpha <= 0.0f;
+		return alpha <= EPSILON;
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
@@ -284,19 +284,22 @@ public:
 			return Vec3(0, 0, 1);
 		}
 		if (isSmooth()) {
-			Vec3 wiLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
-			Vec3 wiWorld = shadingData.frame.toWorld(wiLocal);
-			reflectedColour = evaluate(shadingData, wiWorld);
+			Vec3 wrLocal(-woLocal.x, -woLocal.y, woLocal.z);
+			Vec3 wrWorld = shadingData.frame.toWorld(wrLocal);
+			reflectedColour = evaluate(shadingData, wrWorld);
 			pdf = 1.0f;
-			return wiWorld;
+			return wrWorld;
 		}
-		Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
-		Vec3 wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
+
+		Vec3 wmLocal = SamplingDistributions::sampleGGX(woLocal, alpha, sampler->next(), sampler->next());
+		Vec3 wiLocal = (-woLocal + wmLocal * (2.0f * Dot(woLocal, wmLocal))).normalize();
+
 		if (wiLocal.z <= 0.0f) {
 			pdf = 0.0f;
 			reflectedColour = Colour(0, 0, 0);
 			return shadingData.frame.toWorld(wiLocal);
 		}
+
 		Vec3 wiWorld = shadingData.frame.toWorld(wiLocal);
 		reflectedColour = evaluate(shadingData, wiWorld);
 		pdf = PDF(shadingData, wiWorld);
@@ -307,20 +310,23 @@ public:
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return Colour(0, 0, 0);
+
+		Colour Le = albedo->sample(shadingData.tu, shadingData.tv);
 		if (isSmooth()) {
 			Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z);
-			Vec3 delta = wiLocal - wrLocal;
-			if (delta.lengthSq() > EPSILON) return Colour(0, 0, 0);
+			Vec3 deltaLocal = wiLocal - wrLocal;
+			if (deltaLocal.lengthSq() > EPSILON) return Colour(0, 0, 0);
 			Colour F = ShadingHelper::fresnelConductor(fabsf(woLocal.z), eta, k);
-			return albedo->sample(shadingData.tu, shadingData.tv) * F / wiLocal.z;
+			return Le * F / wiLocal.z;
 		}
-		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
+
+		Vec3 wmLocal = (wiLocal + woLocal).normalize();
+		float D = ShadingHelper::Dggx(wmLocal, alpha);
 		float G = ShadingHelper::Gggx(wiLocal, woLocal, alpha);
-		Colour F = ShadingHelper::fresnelConductor(fabsf(Dot(wiLocal, halfwayLocal)), eta, k);
-		float denom = 4.0f * wiLocal.z * woLocal.z;
-		if (denom <= 0.0f) return Colour(0, 0, 0);
-		return albedo->sample(shadingData.tu, shadingData.tv) * F * (D * G / denom);
+		Colour F = ShadingHelper::fresnelConductor(fabsf(Dot(woLocal, wmLocal)), eta, k);
+		float denominator = 4.0f * wiLocal.z * woLocal.z;
+		if (denominator <= 0.0f) return Colour(0, 0, 0);
+		return Le * F * (D * G / denominator);
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
@@ -328,11 +334,11 @@ public:
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return 0.0f;
 		if (isSmooth()) return 0.0f;
-		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
-		float pdfHalfway = D * halfwayLocal.z;
-		float dHalfway_dWi = 1.0f / (4.0f * fabsf(Dot(wiLocal, halfwayLocal)));
-		return pdfHalfway * dHalfway_dWi;
+		Vec3 wmLocal = (wiLocal + woLocal).normalize();
+		float D = ShadingHelper::Dggx(wmLocal, alpha);
+		float pdfWm = D * wmLocal.z;
+		float dWmDWo = 1.0f / (4.0f * Dot(woLocal, wmLocal));
+		return fabsf(pdfWm * dWmDWo);
 	}
 	bool isPureSpecular()
 	{
@@ -446,85 +452,22 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
-		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
-		if (woLocal.z == 0.0f) {
-			pdf = 0.0f;
-			reflectedColour = Colour(0, 0, 0);
-			return Vec3(0, 0, 1);
-		}
-		Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(Dot(woLocal, halfwayLocal), intIOR, extIOR);
-		Vec3 wiLocal;
-		if (sampler->next() < fresnelReflectance) {
-			wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
-		}
-		else {
-			bool entering = woLocal.z > 0.0f;
-			float fromIOR = entering ? extIOR : intIOR;
-			float toIOR = entering ? intIOR : extIOR;
-			float eta = fromIOR / toIOR;
-			float cosOH = Dot(woLocal, halfwayLocal);
-			float sin2T = eta * eta * (1.0f - cosOH * cosOH);
-			if (sin2T >= 1.0f) wiLocal = (halfwayLocal * (2.0f * cosOH) - woLocal).normalize();
-			else {
-				float cosT = sqrtf(1.0f - sin2T);
-				float sign = cosOH > 0.0f ? 1.0f : -1.0f;
-				wiLocal = (halfwayLocal * (eta * cosOH - sign * cosT) - woLocal * eta).normalize();
-			}
-		}
-		Vec3 wiWorld = shadingData.frame.toWorld(wiLocal);
-		reflectedColour = evaluate(shadingData, wiWorld);
-		pdf = PDF(shadingData, wiWorld);
-		return wiWorld;
+		Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
+		pdf = wi.z / M_PI;
+		reflectedColour = albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
+		wi = shadingData.frame.toWorld(wi);
+		return wi;
 	}
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
 	{
-		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
-		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		if (woLocal.z == 0.0f || wiLocal.z == 0.0f) return Colour(0, 0, 0);
-
-		bool isReflection = wiLocal.z * woLocal.z > 0.0f;
-		float fromIOR = woLocal.z > 0.0f ? extIOR : intIOR;
-		float toIOR = woLocal.z > 0.0f ? intIOR : extIOR;
-		Vec3 halfwayLocal = isReflection ? (wiLocal + woLocal).normalize() : (wiLocal * toIOR + woLocal * fromIOR).normalize();
-		if (halfwayLocal.z < 0.0f) halfwayLocal = -halfwayLocal;
-
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
-		float G = ShadingHelper::Gggx(wiLocal, woLocal, alpha);
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(Dot(woLocal, halfwayLocal), intIOR, extIOR);
-		Colour base = albedo->sample(shadingData.tu, shadingData.tv);
-		if (isReflection) {
-			float denom = 4.0f * fabsf(wiLocal.z * woLocal.z);
-			if (denom <= 0.0f) return Colour(0, 0, 0);
-			return base * (D * G * fresnelReflectance / denom);
-		}
-		float dotHalfwayWi = Dot(wiLocal, halfwayLocal);
-		float dotHalfwayWo = Dot(woLocal, halfwayLocal);
-		float denom = SQ(fromIOR * dotHalfwayWo + toIOR * dotHalfwayWi) * fabsf(wiLocal.z * woLocal.z);
-		if (denom <= 0.0f) return Colour(0, 0, 0);
-		float transmissionFactor = fabsf(dotHalfwayWi * dotHalfwayWo) * (toIOR * toIOR) / (fromIOR * fromIOR);
-		return base * (D * G * (1.0f - fresnelReflectance) * transmissionFactor / denom);
+		// Replace this with Dielectric evaluation code
+		return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
+		// Replace this with Dielectric PDF
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
-		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
-		if (woLocal.z == 0.0f || wiLocal.z == 0.0f) return 0.0f;
-		bool isReflection = wiLocal.z * woLocal.z > 0.0f;
-		float fromIOR = woLocal.z > 0.0f ? extIOR : intIOR;
-		float toIOR = woLocal.z > 0.0f ? intIOR : extIOR;
-		Vec3 halfwayLocal = isReflection ? (wiLocal + woLocal).normalize() : (wiLocal * toIOR + woLocal * fromIOR).normalize();
-		if (halfwayLocal.z < 0.0f) halfwayLocal = -halfwayLocal;
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
-		float pdfHalfway = D * halfwayLocal.z;
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(Dot(woLocal, halfwayLocal), intIOR, extIOR);
-		if (isReflection) {
-			float dHalfway_dWi = 1.0f / (4.0f * fabsf(Dot(wiLocal, halfwayLocal)));
-			return fresnelReflectance * pdfHalfway * dHalfway_dWi;
-		}
-		float denom = SQ(fromIOR * Dot(woLocal, halfwayLocal) + toIOR * Dot(wiLocal, halfwayLocal));
-		float dHalfway_dWi = fabsf((toIOR * toIOR * Dot(wiLocal, halfwayLocal)) / denom);
-		return (1.0f - fresnelReflectance) * pdfHalfway * dHalfway_dWi;
+		return SamplingDistributions::cosineHemispherePDF(wiLocal);
 	}
 	bool isPureSpecular()
 	{
@@ -574,29 +517,28 @@ public:
 		float A = 1.0f - sigmaSq / (2.0f * (sigmaSq + 0.33f));
 		float B = 0.45f * sigmaSq / (sigmaSq + 0.09f);
 
-		float cosThfromIOR = wiLocal.z;
+		float cosThetaI = wiLocal.z;
 		float cosThetaO = woLocal.z;
 
-		float sinThfromIOR = sqrtf(std::max(0.0f, 1.0f - cosThfromIOR * cosThfromIOR));
-		float sinThetaO = sqrtf(std::max(0.0f, 1.0f - cosThetaO * cosThetaO));
+		float sinThetaI = sqrtf(1.0f - cosThetaI * cosThetaI);
+		float sinThetaO = sqrtf(1.0f - cosThetaO * cosThetaO);
 
 		float sinAlpha, tanBeta;
 
-		if (cosThfromIOR > cosThetaO) {
+		if (cosThetaI > cosThetaO) {
 			// theta_i < theta_o
 			sinAlpha = sinThetaO;
-			tanBeta = sinThfromIOR / cosThfromIOR;
+			tanBeta = sinThetaI / cosThetaI;
 		}
 		else {
-			sinAlpha = sinThfromIOR;
+			sinAlpha = sinThetaI;
 			tanBeta = sinThetaO / cosThetaO;
 		}
 
-		float sinThetaProduct = sinThfromIOR * sinThetaO;
+		float sinThetaProduct = sinThetaI * sinThetaO;
 		float cosPhiDiff = 0.0f;
 		if (sinThetaProduct > EPSILON) {
 			cosPhiDiff = (wiLocal.x * woLocal.x + wiLocal.y * woLocal.y) / sinThetaProduct;
-			cosPhiDiff = std::max(-1.0f, std::min(1.0f, cosPhiDiff));
 		}
 
 		float orenNayar = A + B * std::max(0.0f, cosPhiDiff) * sinAlpha * tanBeta;
@@ -625,6 +567,7 @@ public:
 	}
 };
 
+// Phong
 class PlasticBSDF : public BSDF
 {
 public:
@@ -647,16 +590,24 @@ public:
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
-		float specularProbability = std::min(std::max(fresnelReflectance, 0.05f), 0.95f);
+		float F = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
+		float r = sampler->next();
 		Vec3 wiLocal;
-		if (sampler->next() < specularProbability) {
-			Vec3 halfwayLocal = SamplingDistributions::sampleGGXNDF(woLocal, alpha, sampler->next(), sampler->next());
-			wiLocal = (halfwayLocal * (2.0f * Dot(woLocal, halfwayLocal)) - woLocal).normalize();
-		}
-		else {
+
+		if (r < F) {
+			float phongExponent = alphaToPhongExponent();
+			float cosTheta = powf(sampler->next(), 1.0f / (phongExponent + 1.0f));
+			float sinTheta = sqrtf(std::max(0.0f, 1.0f - cosTheta * cosTheta));
+			float phi = 2.0f * M_PI * sampler->next();
+			Vec3 wiLobe(sinTheta * cosf(phi), sinTheta * sinf(phi), cosTheta);
+			Vec3 wrLocal(-woLocal.x, -woLocal.y, woLocal.z);
+			Frame wrFrame;
+			wrFrame.fromVector(wrLocal);
+			wiLocal = wrFrame.toWorld(wiLobe);
+		} else {
 			wiLocal = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
 		}
+
 		Vec3 wiWorld = shadingData.frame.toWorld(wiLocal);
 		reflectedColour = evaluate(shadingData, wiWorld);
 		pdf = PDF(shadingData, wiWorld);
@@ -667,29 +618,28 @@ public:
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return Colour(0, 0, 0);
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
-		Colour diffuseAlbedo = albedo->sample(shadingData.tu, shadingData.tv) * (1.0f - fresnelReflectance);
-		Colour diffuse = diffuseAlbedo / M_PI;
-		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
-		float G = ShadingHelper::Gggx(wiLocal, woLocal, alpha);
-		float specularFresnel = ShadingHelper::fresnelDielectric(fabsf(Dot(wiLocal, halfwayLocal)), intIOR, extIOR);
-		float denom = 4.0f * wiLocal.z * woLocal.z;
-		Colour specular = denom > 0.0f ? Colour(1, 1, 1) * (D * G * specularFresnel / denom) : Colour(0, 0, 0);
-		return diffuse + specular;
+
+		float F = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
+		float phongExponent = alphaToPhongExponent();
+		Vec3 wrLocal(-woLocal.x, -woLocal.y, woLocal.z);
+		float wrDotWi = std::max(0.0f, Dot(wrLocal, wiLocal));
+		Colour diffuse = albedo->sample(shadingData.tu, shadingData.tv) * (1.0f - F) / M_PI;
+		Colour glossy = Colour(1, 1, 1) * F * ((phongExponent + 2.0f) / (2.0f * M_PI)) * powf(wrDotWi, e);
+		return diffuse + glossy;
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return 0.0f;
-		float fresnelReflectance = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
-		float specularProbability = std::min(std::max(fresnelReflectance, 0.05f), 0.95f);
+
+		float F = ShadingHelper::fresnelDielectric(fabsf(woLocal.z), intIOR, extIOR);
+		float e = alphaToPhongExponent();
+		Vec3 wrLocal(-woLocal.x, -woLocal.y, woLocal.z);
+		float wrDotWi = std::max(0.0f, Dot(wrLocal, wiLocal));
 		float diffusePdf = SamplingDistributions::cosineHemispherePDF(wiLocal);
-		Vec3 halfwayLocal = (wiLocal + woLocal).normalize();
-		float D = ShadingHelper::Dggx(halfwayLocal, alpha);
-		float specularPdf = (D * halfwayLocal.z) / (4.0f * fabsf(Dot(wiLocal, halfwayLocal)));
-		return specularProbability * specularPdf + (1.0f - specularProbability) * diffusePdf;
+		float glossyPdf = ((e + 1.0f) / (2.0f * M_PI)) * powf(wrDotWi, e);
+		return F * glossyPdf + (1.0f - F) * diffusePdf;
 	}
 	bool isPureSpecular()
 	{

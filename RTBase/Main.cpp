@@ -56,8 +56,8 @@ int main(int argc, char* argv[])
 	// runTests();
 
 	// Initialize default parameters
-	std::string sceneName = "Assets/cornell-box";
-	//std::string sceneName = "Assets/MaterialsScene";
+	//std::string sceneName = "Assets/cornell-box";
+	std::string sceneName = "Assets/MaterialsScene";
 	//std::string sceneName = "Assets/bathroom";
 	//std::string sceneName = "Assets/bathroom2";
 	//std::string sceneName = "Assets/living-room";
@@ -65,7 +65,8 @@ int main(int argc, char* argv[])
 	//std::string sceneName = "Assets/living-room-3";
 	//std::string sceneName = "Assets/glass-of-water";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 16;//8192;
+	unsigned int SPP = 32;//8192;
+	RayTracer::RenderMode renderMode = RayTracer::RenderMode::PathTrace;
 
 	if (argc > 1)
 	{
@@ -113,6 +114,7 @@ int main(int argc, char* argv[])
 	canvas.create((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, "Tracer", false);
 	RayTracer rt;
 	rt.init(scene, &canvas);
+	rt.setRenderMode(renderMode);
 	bool running = true;
 	GamesEngineeringBase::Timer timer;
 	while (running)
