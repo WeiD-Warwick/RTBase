@@ -339,7 +339,7 @@ public:
 		if (woLocal.z <= 0.0f || wiLocal.z <= 0.0f) return 0.0f;
 		if (isSmooth()) return 0.0f;
 		// Half-vector PDF transform
-		Vec3 wmLocal = wiLocal + woLocal;
+		Vec3 wmLocal = (wiLocal + woLocal).normalize();
 		float D = ShadingHelper::Dggx(wmLocal, alpha);
 		float pdfWm = D * wmLocal.z;
 		float dWmDWo = 1.0f / (4.0f * Dot(woLocal, wmLocal));

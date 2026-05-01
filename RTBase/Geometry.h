@@ -297,12 +297,10 @@ public:
 	// Note there are several options for how to implement the build method. Update this as required
 	void build(std::vector<Triangle>& inputTriangles)
 	{
-		// Add BVH building code here
 		buildRecursive(inputTriangles, 0, inputTriangles.size());
 	}
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection)
 	{
-		// Add BVH Traversal code here
 		float boxT;
 		if (!bounds.rayAABB(ray, boxT)) return;
 		if (boxT > intersection.t) return;
@@ -335,7 +333,6 @@ public:
 	}
 	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, const float maxT)
 	{
-		// Add visibility code here
 		float boxT;
 		if (!bounds.rayAABB(ray, boxT))
 			return true;

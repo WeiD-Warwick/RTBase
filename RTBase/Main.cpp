@@ -7,10 +7,29 @@
 #include "GamesEngineeringBase.h"
 #include <unordered_map>
 
-std::string outputBaseName(const std::string& sceneName, int spp) {
+std::string renderModeName(RayTracer::RenderMode renderMode) {
+	switch (renderMode) {
+	case RayTracer::RenderMode::InstantRadiosity:
+		return "InstantRadiosity";
+	case RayTracer::RenderMode::LightTrace:
+		return "LightTrace";
+	default:
+		return "PathTrace";
+	}
+}
+
+RayTracer::RenderMode parseRenderMode(const std::string& name) {
+	if (name == "pt") return RayTracer::RenderMode::PathTrace;
+	if (name == "ir") return RayTracer::RenderMode::InstantRadiosity;
+	if (name == "lt") return RayTracer::RenderMode::LightTrace;
+	std::cerr << "Warning: Unknown render mode '" << name << "'\n";
+	return RayTracer::RenderMode::PathTrace;
+}
+
+std::string outputBaseName(const std::string& sceneName, int spp, RayTracer::RenderMode renderMode) {
 	size_t pos = sceneName.find_last_of("/\\");
 	std::string shortSceneName = (pos == std::string::npos) ? sceneName : sceneName.substr(pos + 1);
-	std::string runName = shortSceneName + "-" + std::to_string(spp);
+	std::string runName = shortSceneName + "-" + renderModeName(renderMode) + "-" + std::to_string(spp);
 	return "results\\" + runName;
 }
 
@@ -106,6 +125,10 @@ int main(int argc, char* argv[])
 			{
 				SPP = stoi(pair.second);
 			}
+			if (pair.first == "-mode")
+			{
+				renderMode = parseRenderMode(pair.second);
+			}
 		}
 	}
 	Scene* scene = loadScene(sceneName);
@@ -174,7 +197,7 @@ int main(int argc, char* argv[])
 		}
 		if (SPP == rt.getSPP())
 		{
-			std::string baseName = outputBaseName(sceneName, SPP);
+			std::string baseName = outputBaseName(sceneName, SPP, renderMode);
 			std::cout << "Saving " << baseName << " outputs..." << std::endl;
 			rt.saveFinalOutputs(baseName);
 			std::cout << "Done." << std::endl;
