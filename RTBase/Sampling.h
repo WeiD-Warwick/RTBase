@@ -31,10 +31,6 @@ class SamplingDistributions
 public:
 	static Vec3 uniformSampleHemisphere(float r1, float r2)
 	{
-		// Monte Carlo 87
-		// r1 ​= CDF(theta) = 1 - cosTheta
-		// r2 = phi / (2 * PI)
-
 		float cosTheta = 1.0f - r1;
 		float theta = acosf(cosTheta);
 		float phi = 2.0f * M_PI * r2;
@@ -49,28 +45,11 @@ public:
 	}
 	static Vec3 cosineSampleHemisphere(float r1, float r2)
 	{
-		/* Inverse CDF */
-		// Monte Carlo 107
-		// r1 ​= CDF(theta) = sin^2(theta)
-		// r2 = phi / (2 * PI)
 
-		float theta = asinf(sqrtf(r1));
+		float theta = acosf(sqrtf(r1));
 		float phi = 2.0f * M_PI * r2;
 		return SphericalCoordinates::sphericalToWorld(theta, phi);
 
-
-		/* Malley's Method */
-		// Monte Carlo 125
-
-		// sample disk
-		//float r = sqrtf(r1);
-		//float phi = 2.0f * M_PI * r2;
-		//float x = r * cosf(phi);
-		//float y = r * sinf(phi);
-		// project to hemisphere
-		//float z = sqrtf(std::max(0.0f, 1.0f - x * x - y * y));
-
-		//return Vec3(x, y, z);
 	}
 	static float cosineHemispherePDF(const Vec3 wi)
 	{
@@ -80,10 +59,6 @@ public:
 	}
 	static Vec3 uniformSampleSphere(float r1, float r2)
 	{
-		// Monte Carlo 97
-		// r1 ​= CDF(theta) = (1−cosTheta​)/2
-		// r2 = CDF(phi) = Phi / (2 * PI)
-
 		float cosTheta = 1.0f - 2.0f * r1;
 		float theta = acosf(cosTheta);
 		float phi = 2.0f * M_PI * r2;
