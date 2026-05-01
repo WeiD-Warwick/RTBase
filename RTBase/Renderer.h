@@ -81,11 +81,11 @@ public:
 	}
 
 	float powerHeuristic(float pdfA, float pdfB) {
-		float a2 = pdfA * pdfA;
-		float b2 = pdfB * pdfB;
-		float sum = a2 + b2;
+		float pdfASq = pdfA * pdfA;
+		float pdfBSq = pdfB * pdfB;
+		float sum = pdfASq + pdfBSq;
 		if (sum <= 0.0f) return 0.0f;
-		return a2 / sum;
+		return pdfASq / sum;
 	}
 
 	Colour clampSample(Colour colour) {
@@ -180,15 +180,14 @@ public:
 	}
 
 	Colour computeVPLContribution(const ShadingData& shadingData, const VPL& vpl) {
-		const float minDistanceSquared = 0.01f;
 		// Connect shading point to VPL
 		Vec3 toVPL = vpl.shadingData.x - shadingData.x;
-		float distanceSquared = toVPL.lengthSq();
-		if (distanceSquared <= minDistanceSquared) {
+		float distanceSq = toVPL.lengthSq();
+		if (distanceSq <= EPSILON) {
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 
-		float distance = sqrtf(distanceSquared);
+		float distance = sqrtf(distanceSq);
 		Vec3 wi = toVPL / distance;
 		float cosThetaX = Dot(shadingData.sNormal, wi);
 		float cosThetaVPL = Dot(vpl.shadingData.sNormal, -wi);
@@ -209,7 +208,7 @@ public:
 		Colour bsdfAtX = shadingData.bsdf->evaluate(shadingData, wi);
 		Colour bsdfAtVPL = vpl.shadingData.bsdf->evaluate(vpl.shadingData, -wi);
 		// Geometry
-		float G = (cosThetaX * cosThetaVPL) / distanceSquared;
+		float G = (cosThetaX * cosThetaVPL) / distanceSq;
 
 		return vpl.Le * bsdfAtVPL * bsdfAtX * G;
 	}
@@ -451,30 +450,30 @@ public:
 		return directLighting + indirectLighting;
 	}
 
-	void connectToCamera(Vec3 p, Vec3 n, Colour col) {
+	void connectToCamera(Vec3 position, Vec3 normal, Colour throughput) {
 		float px = 0.0f;
 		float py = 0.0f;
 		// Project to film
-		if (!scene->camera.projectOntoCamera(p, px, py)) return;
+		if (!scene->camera.projectOntoCamera(position, px, py)) return;
 
-		Vec3 toCamera = scene->camera.origin - p;
+		Vec3 toCamera = scene->camera.origin - position;
 		float dist2 = toCamera.lengthSq();
 		if (dist2 <= EPSILON) return;
 
 		float dist = sqrtf(dist2);
 		Vec3 wi = toCamera / dist;
-		float cosSurface = Dot(n, wi);
+		float cosSurface = Dot(normal, wi);
 		if (cosSurface <= 0.0f) return;
 
 		float cosCamera = Dot(-wi, scene->camera.viewDirection);
 		if (cosCamera <= 0.0f || scene->camera.Afilm <= 0.0f) return;
 
-		if (!scene->visible(p, scene->camera.origin)) return;
+		if (!scene->visible(position, scene->camera.origin)) return;
 
 		// Camera connection weight
 		float G = cosSurface * cosCamera / dist2;
 		float We = 1.0f / (scene->camera.Afilm * SQ(SQ(cosCamera)));
-		Colour contribution = clampSample(col * G * We);
+		Colour contribution = clampSample(throughput * G * We);
 		// Splat light contribution
 		film->splat(px, py, contribution);
 	}
@@ -495,8 +494,8 @@ public:
 			cameraShadingData.frame.fromVector(cameraShadingData.sNormal);
 		}
 		// Connect light vertex to camera
-		Colour col = pathThroughput * cameraShadingData.bsdf->evaluate(cameraShadingData, shadingData.wo) * Le;
-		connectToCamera(cameraShadingData.x, cameraShadingData.sNormal, col);
+		Colour currentColour = pathThroughput * cameraShadingData.bsdf->evaluate(cameraShadingData, shadingData.wo) * Le;
+		connectToCamera(cameraShadingData.x, cameraShadingData.sNormal, currentColour);
 
 		if (depth >= maxDepth) return;
 
