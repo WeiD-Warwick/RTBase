@@ -195,13 +195,11 @@ int main(int argc, char* argv[])
 			std::string ldrFilename = filename.substr(0, pos) + "-" + std::to_string(rt.getSPP()) + ".png";
 			rt.savePNG(ldrFilename);
 		}
-		if (rt.getSPP() == 8 || rt.getSPP() == 16 || rt.getSPP() == 32 || rt.getSPP() == 64 || rt.getSPP() == 128) {
-			std::string baseName = outputBaseName(sceneName, rt.getSPP(), renderMode);
-			std::cout << "Saving " << baseName << " outputs..." << std::endl;
-			rt.saveFinalOutputs(baseName);
-			std::cout << "Done." << std::endl;
-			break;
-		}
+		//if (rt.getSPP() == 8 || rt.getSPP() == 16 || rt.getSPP() == 32 || rt.getSPP() == 64 || rt.getSPP() == 128) {
+		//	std::string baseName = outputBaseName(sceneName, rt.getSPP(), renderMode);
+		//	std::cout << "Saving " << baseName << " outputs..." << std::endl;
+		//	rt.saveFinalOutputs(baseName);
+		//}
 		if (SPP == rt.getSPP())
 		{
 			std::string baseName = outputBaseName(sceneName, SPP, renderMode);
