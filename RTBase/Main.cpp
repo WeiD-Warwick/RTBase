@@ -75,17 +75,14 @@ int main(int argc, char* argv[])
 	// runTests();
 
 	// Initialize default parameters
-	//std::string sceneName = "Assets/cornell-box";
+	std::string sceneName = "Assets/cornell-box";
 	//std::string sceneName = "Assets/MaterialsScene";
-	std::string sceneName = "Assets/kitchen";
+	//std::string sceneName = "Assets/kitchen";
 	//std::string sceneName = "Assets/bathroom";
 	//std::string sceneName = "Assets/living-room-2";
 	//std::string sceneName = "Assets/bedroom";
 	std::string filename = "GI.hdr";
-	//unsigned int SPP = 8192;
-	unsigned int SPP = 256;
-	//unsigned int SPP = 128;
-	//unsigned int SPP = 64;
+	unsigned int SPP = 128;
 	RayTracer::RenderMode renderMode = RayTracer::RenderMode::PathTrace;
 	//RayTracer::RenderMode renderMode = RayTracer::RenderMode::InstantRadiosity;
 	//RayTracer::RenderMode renderMode = RayTracer::RenderMode::LightTrace;
@@ -187,7 +184,7 @@ int main(int argc, char* argv[])
 		rt.render();
 		float t = timer.dt();
 		// Write
-		std::cout << t << std::endl;
+		std::cout << "[" << rt.getSPP() << "]: " << t << std::endl;
 		if (canvas.keyPressed('P'))
 		{
 			rt.saveHDR(filename);
@@ -197,6 +194,13 @@ int main(int argc, char* argv[])
 			size_t pos = filename.find_last_of('.');
 			std::string ldrFilename = filename.substr(0, pos) + "-" + std::to_string(rt.getSPP()) + ".png";
 			rt.savePNG(ldrFilename);
+		}
+		if (rt.getSPP() == 8 || rt.getSPP() == 16 || rt.getSPP() == 32 || rt.getSPP() == 64 || rt.getSPP() == 128) {
+			std::string baseName = outputBaseName(sceneName, rt.getSPP(), renderMode);
+			std::cout << "Saving " << baseName << " outputs..." << std::endl;
+			rt.saveFinalOutputs(baseName);
+			std::cout << "Done." << std::endl;
+			break;
 		}
 		if (SPP == rt.getSPP())
 		{
